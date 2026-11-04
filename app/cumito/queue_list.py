@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
@@ -264,22 +264,47 @@ class QueueList(QWidget):
             r.show()
 
     # ------------------------------------------------------------------ arrastrar
+    # La fila agarrada NO se esconde (si se esconde, Windows deja de avisarle
+    # que soltaste el mouse y el arrastre queda colgado): se convierte en el
+    # hueco punteado y se va moviendo. Además, mientras dura el arrastre se
+    # escucha el mouse en toda la app: soltar en cualquier lado (o perder el
+    # foco, o Esc) siempre lo termina.
+    PH_STYLE = ("QWidget#trackrow { background: rgba(142,108,242,0.12);"
+                " border: 1px dashed rgba(170,140,255,0.75); border-radius: 10px; }")
+
     def _drag_start(self, row, gpos):
+        if self._drag is not None:
+            return
         idx = self._ready_lay.indexOf(row)
         if idx < 0 or self._ready_lay.count() < 2:
             return
         win = self.window()
         pix = row.grab()
-        self._ph = _Placeholder()
-        self._ready_lay.insertWidget(idx, self._ph)
-        self._ready_lay.removeWidget(row)
-        row.hide()
-        top_left = row.mapTo(win, QPoint(0, 0)) if row.parent() else QPoint(0, 0)
+        top_left = row.mapTo(win, QPoint(0, 0))
+        hidden = [c for c in row.findChildren(QWidget) if c.isVisible()]
+        for c in hidden:
+            c.hide()
+        style = row.styleSheet()
+        row.setStyleSheet(self.PH_STYLE)
         ghost = _Ghost(pix, win)
         grab_off = win.mapFromGlobal(gpos) - top_left
-        self._drag = {"row": row, "from": idx, "ghost": ghost, "off": grab_off + QPoint(ghost._m, ghost._m)}
+        self._drag = {"row": row, "from": idx, "ghost": ghost, "hidden": hidden, "style": style,
+                      "off": grab_off + QPoint(ghost._m, ghost._m)}
         ghost.move(win.mapFromGlobal(gpos) - self._drag["off"])
         QApplication.setOverrideCursor(Qt.ClosedHandCursor)
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, ev):
+        d = self._drag
+        if d is not None:
+            t = ev.type()
+            if t == QEvent.MouseMove:
+                self._drag_move(QCursor.pos())
+            elif t == QEvent.MouseButtonRelease:
+                QTimer.singleShot(0, lambda: self._drag_end(QCursor.pos()))
+            elif t == QEvent.ApplicationDeactivate or (t == QEvent.KeyPress and ev.key() == Qt.Key_Escape):
+                QTimer.singleShot(0, lambda: self._drag_end(QCursor.pos(), cancel=True))
+        return False
 
     def _drag_move(self, gpos):
         d = self._drag
@@ -287,18 +312,15 @@ class QueueList(QWidget):
             return
         win = self.window()
         d["ghost"].move(win.mapFromGlobal(gpos) - d["off"])
-        # dónde caería: según el centro de cada fila del grupo
-        y = self.ready_box.mapFromGlobal(gpos).y()
+        row = d["row"]
         lay = self._ready_lay
-        target = 0
-        others = [lay.itemAt(i).widget() for i in range(lay.count()) if lay.itemAt(i).widget() is not self._ph]
-        for w in others:
-            c = w.mapTo(self.ready_box, QPoint(0, w.height() // 2)).y()
-            if y > c:
-                target += 1
-        if lay.indexOf(self._ph) != target:
-            lay.removeWidget(self._ph)
-            lay.insertWidget(target, self._ph)
+        # dónde caería: según el centro de cada una de las otras filas
+        y = self.ready_box.mapFromGlobal(gpos).y()
+        others = [lay.itemAt(i).widget() for i in range(lay.count()) if lay.itemAt(i).widget() is not row]
+        target = sum(1 for w in others if y > w.mapTo(self.ready_box, QPoint(0, w.height() // 2)).y())
+        if lay.indexOf(row) != target:
+            lay.removeWidget(row)
+            lay.insertWidget(target, row)
         # si se acerca a los bordes, la lista se desplaza sola
         if self._scroll is not None:
             vp = self._scroll.viewport()
@@ -309,22 +331,31 @@ class QueueList(QWidget):
             elif vy > vp.height() - 28:
                 bar.setValue(bar.value() + 10)
 
-    def _drag_end(self, gpos):
+    def _drag_end(self, gpos=None, cancel=False):
         d = self._drag
         if d is None:
             return
         self._drag = None
-        QApplication.restoreOverrideCursor()
-        lay = self._ready_lay
-        to = lay.indexOf(self._ph)
-        lay.removeWidget(self._ph)
-        self._ph.deleteLater()
+        QApplication.instance().removeEventFilter(self)
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
         row = d["row"]
-        lay.insertWidget(to, row)
-        row.show()
+        lay = self._ready_lay
+        if cancel and lay.indexOf(row) != d["from"]:
+            lay.removeWidget(row)
+            lay.insertWidget(d["from"], row)
+        to = lay.indexOf(row)
+        try:
+            row.setStyleSheet(d["style"])
+            for c in d["hidden"]:
+                c.show()
+            row._press = None
+            row._dragging = False
+        except RuntimeError:
+            pass  # la fila ya no existe
         d["ghost"].deleteLater()
         uid = row.property("uid")
-        if to != d["from"] and uid is not None:
+        if not cancel and to != d["from"] and uid is not None:
             self._optimistic = (uid, to, time.monotonic() + 2.5)
             self.move.emit(uid, to)
         if self._deferred is not None:

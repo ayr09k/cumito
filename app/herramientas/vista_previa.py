@@ -148,9 +148,48 @@ wait(1200)
 w._open_sheet()
 wait(600)
 shot(w, "06_playlist_abierta")
-# arrastrar "La Bachata" al primer lugar (a mitad del arrastre)
-from PySide6.QtCore import QPoint
+# --- prueba con eventos de mouse de verdad: agarrar, mover y soltar FUERA de la fila ---
+from PySide6.QtCore import QPoint, QPointF, QEvent
+from PySide6.QtGui import QMouseEvent, QCursor
+from PySide6.QtWidgets import QApplication as _QA
 ql = w.sheet_list_widget
+res = []
+def _send(widget, typ, gpos, buttons):
+    QCursor.setPos(gpos)
+    local = QPointF(widget.mapFromGlobal(gpos))
+    ev = QMouseEvent(typ, local, QPointF(gpos), Qt.LeftButton, buttons, Qt.NoModifier)
+    _QA.sendEvent(widget, ev)
+    app.processEvents()
+order = lambda: [ql._ready_lay.itemAt(i).widget().property("uid") for i in range(ql._ready_lay.count())]
+row = ql._rows[5][0]
+p0 = row.mapToGlobal(QPoint(60, 23))
+res.append(f"antes: {order()}")
+_send(row, QEvent.MouseButtonPress, p0, Qt.LeftButton)
+first = ql._rows[1][0]
+for k in range(1, 8):
+    _send(row, QEvent.MouseMove, p0 + QPoint(0, -k * 14), Qt.LeftButton)
+res.append(f"arrastrando: drag={'sí' if ql._drag else 'no'} cursor={'mano cerrada' if _QA.overrideCursor() else 'normal'}")
+# soltar sobre OTRO widget (antes esto dejaba todo colgado)
+_send(w, QEvent.MouseButtonRelease, p0 + QPoint(0, -98), Qt.NoButton)
+wait(100)
+res.append(f"después de soltar: drag={'COLGADO' if ql._drag else 'terminado'} cursor={'COLGADO' if _QA.overrideCursor() else 'normal'} orden={order()}")
+# cancelar con Esc
+row = ql._rows[2][0]
+p1 = row.mapToGlobal(QPoint(60, 23))
+_send(row, QEvent.MouseButtonPress, p1, Qt.LeftButton)
+for k in range(1, 6):
+    _send(row, QEvent.MouseMove, p1 + QPoint(0, k * 14), Qt.LeftButton)
+from PySide6.QtGui import QKeyEvent
+_QA.sendEvent(w, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+wait(100)
+res.append(f"Esc: drag={'COLGADO' if ql._drag else 'cancelado'} orden={order()}")
+_send(row, QEvent.MouseButtonRelease, p1, Qt.NoButton)
+wait(100)
+res.append(f"la fila sigue respondiendo a clics: {'sí' if row.isVisible() and not row._dragging else 'NO'}")
+(OUT / "PRUEBA_ARRASTRE.txt").write_text("\n".join(res), encoding="utf-8")
+print("\n".join(res))
+
+# arrastrar "La Bachata" al primer lugar (a mitad del arrastre)
 row = ql._rows[5][0]
 start = row.mapToGlobal(QPoint(60, 23))
 ql._drag_start(row, start)
