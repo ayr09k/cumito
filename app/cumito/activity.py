@@ -14,7 +14,7 @@ import time
 import zlib
 
 from PySide6.QtCore import QEasingCurve, QRectF, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import icons, theme
@@ -228,6 +228,18 @@ class Ticker(QWidget):
 # Pantalla de actividad (estilo chat)
 # ======================================================================
 
+BUBBLE_MAX = 248   # ancho máximo de una burbuja
+
+
+def _fit(label: QLabel, text: str, px: float, bold: bool, room: int):
+    """Una QLabel con salto de línea calcula mal su ancho y queda angosta:
+    se le da el ancho de su texto (hasta el máximo que cabe)."""
+    f = QFont(theme.GLASS_FONT_FAMILY)
+    f.setPixelSize(int(round(px)))
+    f.setBold(bold)
+    label.setMinimumWidth(min(QFontMetrics(f).horizontalAdvance(text) + 4, room))
+
+
 class _Bubble(QWidget):
     """Una burbuja: el texto y, si fue sobre una canción, su tarjetita."""
 
@@ -239,6 +251,8 @@ class _Bubble(QWidget):
         bg = "rgba(142,108,242,0.20)" if bot else "rgba(255,255,255,0.08)"
         border = "rgba(142,108,242,0.40)" if bot else "rgba(255,255,255,0.10)"
         self.setStyleSheet(f"QWidget#actbubble {{ background:{bg}; border:1px solid {border}; border-radius:13px; }}")
+        self.setMaximumWidth(BUBBLE_MAX)
+        room = BUBBLE_MAX - 24
         lay = QVBoxLayout(self)
         lay.setContentsMargins(11, 7, 11, 8)
         lay.setSpacing(6)
@@ -246,12 +260,14 @@ class _Bubble(QWidget):
         txt = QLabel(raw[:1].upper() + raw[1:])
         txt.setWordWrap(True)
         txt.setStyleSheet(f"color:{theme.GLASS_TEXT}; font-size:12px; background:transparent;")
+        _fit(txt, txt.text(), 12, False, room)
         lay.addWidget(txt)
         self.art_label = None
         if a.get("title"):
             card = QHBoxLayout()
             card.setSpacing(8)
-            if a.get("art") or a.get("kind") in ("add", "play_now", "skip", "remove", "restored", "playlist"):
+            has_art = bool(a.get("art"))
+            if has_art:
                 self.art_label = QLabel()
                 self.art_label.setFixedSize(34, 34)
                 self.art_label.setStyleSheet("background: rgba(255,255,255,0.08); border-radius:8px;")
@@ -263,10 +279,13 @@ class _Bubble(QWidget):
             t = QLabel(a["title"])
             t.setWordWrap(True)
             t.setStyleSheet("color:#fff; font-size:11.5px; font-weight:700; background:transparent;")
+            _fit(t, a["title"], 11.5, True, room - (42 if has_art else 0))
             info.addWidget(t)
             if a.get("sub"):
                 s = QLabel(a["sub"])
+                s.setWordWrap(True)
                 s.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE}; font-size:10.5px; background:transparent;")
+                _fit(s, a["sub"], 10.5, False, room - (42 if has_art else 0))
                 info.addWidget(s)
             card.addLayout(info, 1)
             lay.addLayout(card)
