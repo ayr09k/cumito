@@ -7,7 +7,8 @@ App -> Servidor:
     {"type": "command", "action": "play", "query": "..."}
     {"type": "command", "action": "pause" | "resume" | "skip" | "stop"}
     {"type": "command", "action": "stop_and_leave"}
-    {"type": "command", "action": "queue_remove", "index": 2}
+    {"type": "command", "action": "queue_remove", "index": 2, "uid": 42}
+    {"type": "command", "action": "queue_move", "uid": 42, "to": 0}     # reordenar (solo preparadas)
     {"type": "command", "action": "queue_clear"}
     {"type": "command", "action": "set_volume", "value": 0.6}
     {"type": "command", "action": "search", "query": "...", "limit": 8, "offset": 0,

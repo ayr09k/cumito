@@ -46,6 +46,7 @@ from .hold import HoldButton, HoldConfirm
 from .wheel import OptionWheel
 from .mini import CHROMAS, SHAPE_NAMES, MiniWindow
 from .dim_editor import DimEditor
+from .queue_list import QueueList
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -429,16 +430,44 @@ class _SwipeHint(QWidget):
         p.end()
 
 
+class _Grip(QLabel):
+    """Los puntitos para agarrar una canción y moverla (con la manita)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(14, 22)
+        self.setCursor(Qt.OpenHandCursor)
+        self.setToolTip("Arrástrala para cambiar el orden")
+        pm = QPixmap(14, 22)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 110))
+        for cx in (4.5, 9.5):
+            for cy in (6, 11, 16):
+                p.drawEllipse(QRectF(cx - 1.4, cy - 1.4, 2.8, 2.8))
+        p.end()
+        self.setPixmap(pm)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # el arrastre lo maneja la fila
+
+
 class _TrackRow(QWidget):
     clicked = Signal()
     remove_clicked = Signal()
+    drag_started = Signal(QPoint)
+    drag_moved = Signal(QPoint)
+    drag_ended = Signal(QPoint)
 
     def __init__(self, title, artist, duration, pixmap=None, active=False, removable=True,
-                 status="ready", flash=False, parent=None):
+                 status="ready", flash=False, draggable=False, parent=None):
         """status: "ready" (lista), "pending" (aún no lista) o "loading"
         (preparándose: circulito girando). flash: borde verde de "¡lista!"."""
         super().__init__(parent)
         self.status = status
+        self.draggable = draggable
+        self._press = None
+        self._dragging = False
         self.setFixedHeight(46)
         self.setCursor(Qt.PointingHandCursor)
         self.active = active
@@ -507,6 +536,8 @@ class _TrackRow(QWidget):
             dur_lbl.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10px; background:transparent;")
             lay.addWidget(dur_lbl)
 
+        if draggable:
+            lay.addWidget(_Grip())
         if removable and not active:
             remove_btn = QPushButton("")
             remove_btn.setFixedSize(22, 22)
@@ -528,10 +559,34 @@ class _TrackRow(QWidget):
             pm = _gradient_label(34, 34, 8)
         self.thumb.setPixmap(_with_ready_border(pm, 8) if flash else pm)
 
+    # tocar = clic al SOLTAR (así se puede agarrar y arrastrar sin activarla)
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
-            self.clicked.emit()
+            self._press = ev.globalPosition().toPoint()
+            self._dragging = False
         super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._press is not None and ev.buttons() & Qt.LeftButton:
+            gp = ev.globalPosition().toPoint()
+            if self._dragging:
+                self.drag_moved.emit(gp)
+            elif self.draggable and (gp - self._press).manhattanLength() > 6:
+                self._dragging = True
+                self.drag_started.emit(self._press)
+                self.drag_moved.emit(gp)
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._press is not None:
+            gp = ev.globalPosition().toPoint()
+            if self._dragging:
+                self.drag_ended.emit(gp)
+            elif self.rect().contains(ev.position().toPoint()):
+                self.clicked.emit()
+        self._press = None
+        self._dragging = False
+        super().mouseReleaseEvent(ev)
 
 
 class _Tile(QWidget):
@@ -1424,12 +1479,13 @@ class GlassScreen(QWidget):
         sheet_head.addWidget(self.btn_clear_queue)
         slay.addLayout(sheet_head)
 
-        self.sheet_list_widget = QWidget()
-        self.sheet_list_layout = QVBoxLayout(self.sheet_list_widget)
-        self.sheet_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.sheet_list_layout.setSpacing(2)
-        self.sheet_list_layout.addStretch()
+        self.sheet_list_widget = QueueList(self._make_queue_row, self.art_cache)
         self.sheet_scroll = _bare_scroll(self.sheet_list_widget)
+        self.sheet_list_widget._scroll = self.sheet_scroll
+        self.sheet_list_widget.play.connect(lambda u: self._queue_cmd("play_index", u))
+        self.sheet_list_widget.prepare.connect(lambda u: self._queue_cmd("prepare", u))
+        self.sheet_list_widget.remove.connect(lambda u: self._queue_cmd("queue_remove", u))
+        self.sheet_list_widget.move.connect(lambda u, to: self.send_command("queue_move", uid=u, to=to))
         slay.addWidget(self.sheet_scroll, 1)
 
         self._sheet_anim = QPropertyAnimation(self.playlist_sheet, b"pos")
@@ -2102,68 +2158,42 @@ class GlassScreen(QWidget):
         self.btn_play.set_icon(name)
         self.mp_play.set_icon(name)
 
-    def _refresh_sheet_list(self, force=False):
-        # solo se rehace si de verdad cambió algo (con playlists largas,
-        # rehacer 200 filas en cada aviso del servidor la pondría lenta)
-        np_ = self.state.get("now_playing") or {}
-        now_ = time.monotonic()
-        sig = (
-            np_.get("title"), bool(self.art_cache.get(np_.get("art_url"))),
-            tuple((t.get("uid"), t.get("title"), t.get("ready", True), bool(t.get("loading")),
-                   bool(self.art_cache.get(t.get("art_url"))), self._flash_until.get(t.get("uid"), 0) > now_)
-                  for t in self.state.get("queue", [])),
-        )
-        if sig == self._sheet_sig and not force:
-            return
-        self._sheet_sig = sig
-        # limpia lo anterior
-        while self.sheet_list_layout.count() > 1:
-            item = self.sheet_list_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+    def _make_queue_row(self, t, status, flash):
+        if status == "now":
+            return _TrackRow(t["title"], t.get("uploader") or "", t.get("duration"),
+                             pixmap=self.art_cache.get(t.get("art_url")), active=True, removable=False)
+        row = _TrackRow(t["title"], t.get("uploader") or "", t.get("duration"),
+                        pixmap=self.art_cache.get(t.get("art_url")) if status == "ready" else None,
+                        status=status, flash=flash, draggable=(status == "ready"))
+        if status == "ready":
+            row.setToolTip("Tócala para ponerla ya · arrástrala para cambiar el orden")
+        return row
 
-        np = self.state.get("now_playing")
-        queue = self.state.get("queue", [])
+    def _queue_cmd(self, action, uid):
+        """Las filas hablan por su id; el servidor (los viejos) también quiere la posición."""
+        idx = next((i for i, t in enumerate(self.state.get("queue") or []) if t.get("uid") == uid), -1)
+        self.send_command(action, index=idx, uid=uid)
+
+    def _refresh_sheet_list(self, force=False):
+        queue = self.state.get("queue", []) or []
         self.btn_clear_queue.setEnabled(bool(queue))
-        rows = []
-        if np:
-            row = _TrackRow(np["title"], np.get("uploader") or "", np.get("duration"),
-                             pixmap=self.art_cache.get(np.get("art_url")), active=True, removable=False)
-            rows.append(row)
         now = time.monotonic()
-        seen_ready = set()
-        for i, t in enumerate(queue):
+        # destello verde de 2 s cuando una canción recién queda lista
+        for t in queue:
             uid = t.get("uid")
-            # servidores viejos no mandan "ready": se toma como lista
-            ready = t.get("ready", True)
-            status = "ready" if ready else ("loading" if t.get("loading") else "pending")
-            if ready and uid is not None:
-                seen_ready.add(uid)
-                # recién quedó lista (antes la vimos sin estar lista): destello verde
+            if uid is None:
+                continue
+            prepared = t.get("prepared", t.get("ready", True))
+            if prepared:
                 if uid in self._seen_unready:
                     self._seen_unready.discard(uid)
                     self._flash_until[uid] = now + 2.0
                     QTimer.singleShot(2100, lambda: self._refresh_sheet_list(force=True))
-            elif uid is not None:
+            else:
                 self._seen_unready.add(uid)
-            flash = ready and self._flash_until.get(uid, 0) > now
-            if ready:
-                self.art_cache.request(t.get("art_url"))
-            row = _TrackRow(t["title"], t.get("uploader") or "", t.get("duration"),
-                            pixmap=self.art_cache.get(t.get("art_url")), status=status, flash=flash)
-            row.remove_clicked.connect(lambda idx=i, u=uid: self.send_command("queue_remove", index=idx))
-            if status == "ready":
-                row.setToolTip("Tócala para ponerla ya")
-                row.clicked.connect(lambda idx=i, u=uid: self.send_command("play_index", index=idx, uid=u))
-            elif status == "pending":
-                row.clicked.connect(lambda idx=i, u=uid: self.send_command("prepare", index=idx, uid=u))
-            rows.append(row)
-        # que no crezcan sin fin
         self._flash_until = {u: t for u, t in self._flash_until.items() if t > now}
-
-        for row in rows:
-            self.sheet_list_layout.insertWidget(self.sheet_list_layout.count() - 1, row)
+        flashing = {u for u, t in self._flash_until.items() if t > now}
+        self.sheet_list_widget.set_data(self.state.get("now_playing"), queue, flashing)
 
     # ================= controles =================
     def _on_play_pause(self):

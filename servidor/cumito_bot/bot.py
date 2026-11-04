@@ -23,16 +23,12 @@ import discord
 import yt_dlp
 from discord import app_commands
 
-# --- Deno / FFmpeg: carpetas donde pueden vivir, sin que haya que tocar nada ---
-for _d in (
-    sysconfig.get_path("scripts"),
-    os.path.dirname(sys.executable),
-    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links"),
-    os.path.join(os.path.expanduser("~"), ".deno", "bin"),
-):
-    if _d and os.path.isdir(_d):
-        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+from .extractor import (  # noqa: F401  (lo usan el bot y las búsquedas)
+    COOKIES_PATH, SEARCH_YTDL_OPTS, YTDL_OPTS, _best_thumb, _extract_one, _extract_sync, _is_url, _opts,
+    _worker_init, _youtube_title,
+)
 
+log = logging.getLogger("cumito.bot")
 
 def ffmpeg_path() -> str:
     p = shutil.which("ffmpeg")
@@ -45,25 +41,6 @@ def ffmpeg_path() -> str:
         return "ffmpeg"
 
 
-YTDL_OPTS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "no_warnings": True,
-    "default_search": "ytsearch",
-    "source_address": "0.0.0.0",
-    "socket_timeout": 20,
-}
-# Para buscar varios resultados rápido (el mosaico del buscador): extracción
-# "plana", sin resolver el audio de cada video uno por uno.
-SEARCH_YTDL_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "default_search": "ytsearch",
-    "extract_flat": "in_playlist",
-    "skip_download": True,
-    "socket_timeout": 20,
-}
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -loglevel error"
 FFMPEG_OPTIONS = "-vn"
 # Lo que diga FFmpeg (el que reproduce el audio) se guarda aquí, para poder
@@ -119,96 +96,34 @@ def fmt_duration(seconds):
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def _best_thumb(info: dict):
-    """Saca la mejor miniatura que yt-dlp nos haya dado, sin pedir nada extra."""
-    thumb = info.get("thumbnail")
-    if thumb:
-        return thumb
-    thumbs = info.get("thumbnails") or []
-    if thumbs:
-        return thumbs[-1].get("url")
-    return None
+_POOL = None
 
 
-# ---------------------------------------------------------------------------
-# YouTube desconfía de los servidores en la nube y a veces pide "iniciar
-# sesión". Dos defensas:
-#   1. cookies.txt (opcional, al lado de run.py): cookies de una cuenta de
-#      Google DE REPUESTO. Si existe, se usa para YouTube.
-#   2. Respaldo con SoundCloud: si YouTube no deja sacar una canción, se
-#      busca la misma (por su título) en SoundCloud y se pone desde ahí.
-# ---------------------------------------------------------------------------
-COOKIES_PATH = Path(__file__).resolve().parent.parent / "cookies.txt"
-log = logging.getLogger("cumito.bot")
-
-
-def _opts(base: dict) -> dict:
-    opts = dict(base)
-    if COOKIES_PATH.exists():
-        opts["cookiefile"] = str(COOKIES_PATH)
-    return opts
-
-
-def _is_url(q: str) -> bool:
-    return q.strip().lower().startswith(("http://", "https://"))
-
-
-def _youtube_title(url: str) -> str | None:
-    """El título de un video de YouTube sin tocar el reproductor (oEmbed
-    público): sirve aunque YouTube esté bloqueando la reproducción."""
-    try:
-        import urllib.parse
-        import urllib.request
-        api = "https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(url, safe="")
-        with urllib.request.urlopen(api, timeout=6) as r:
-            return json.loads(r.read().decode("utf-8")).get("title")
-    except Exception:
-        return None
-
-
-def _extract_one(opts: dict, query: str) -> dict:
-    with yt_dlp.YoutubeDL(_opts(opts)) as ydl:
-        info = ydl.extract_info(query, download=False)
-        if info and "entries" in info:
-            entries = [e for e in (info.get("entries") or []) if e]
-            if not entries:
-                raise RuntimeError("sin resultados")
-            info = entries[0]
-        return {
-            "title": info.get("title", "Sin título"),
-            "webpage_url": info.get("webpage_url") or query,
-            "stream_url": info["url"],
-            "http_headers": info.get("http_headers") or {},
-            "resolved_at": time.time(),
-            "duration": info.get("duration"),
-            "art_url": _best_thumb(info),
-            "uploader": info.get("uploader") or info.get("channel"),
-        }
+def _extract_pool():
+    """Dos "ayudantes" en procesos aparte, siempre listos (yt-dlp ya cargado),
+    con prioridad baja. Antes esto corría en el mismo proceso que el audio y
+    lo hacía trabarse mientras se preparaba otra canción."""
+    global _POOL
+    if _POOL is None:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        _POOL = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"),
+                                    initializer=_worker_init)
+    return _POOL
 
 
 async def extract(query: str, title_hint: str | None = None) -> dict:
+    global _POOL
     loop = asyncio.get_running_loop()
-
-    def _run():
-        try:
-            return _extract_one(YTDL_OPTS, query)
-        except Exception as yt_err:
-            if "soundcloud.com" in query:
-                raise
-            terms = title_hint or (None if _is_url(query) else query)
-            if not terms and "youtu" in query:
-                terms = _youtube_title(query)
-            if not terms:
-                raise
-            log.warning("YouTube no dejó sacar '%s' (%s). Probando en SoundCloud...", terms, str(yt_err)[:120])
-            try:
-                data = _extract_one(YTDL_OPTS, f"scsearch1:{terms}")
-            except Exception:
-                raise yt_err
-            data["source"] = "soundcloud"
-            return data
-
-    return await loop.run_in_executor(None, _run)
+    try:
+        return await loop.run_in_executor(_extract_pool(), _extract_sync, query, title_hint)
+    except Exception as e:
+        from concurrent.futures.process import BrokenProcessPool
+        if not isinstance(e, BrokenProcessPool):
+            raise
+        log.warning("Los ayudantes se cayeron; los reinicio y sigo")
+        _POOL = None
+        return await loop.run_in_executor(None, _extract_sync, query, title_hint)
 
 
 def _flat_search(prefix: str, query: str, limit: int) -> list[dict]:
@@ -555,7 +470,7 @@ class BotCore:
         who = (str(who).strip() or "Alguien")[:32] if who else "Alguien"
         now = time.time()
         last = self.activity[-1] if self.activity else None
-        if (kind == "volume" and last and last.get("kind") == "volume"
+        if (kind in ("volume", "move") and last and last.get("kind") == kind
                 and last.get("who") == who and now - last.get("ts", 0) < 10):
             # mover la barrita de volumen no llena el registro: se actualiza
             last.update(text=text, ts=now)
@@ -628,9 +543,10 @@ class BotCore:
                 {"uid": t.get("uid"), "req": t.get("req"), "title": t["title"], "duration": t.get("duration"),
                  "uploader": t.get("uploader"),
                  "ready": self._is_ready(t), "loading": bool(t.get("loading")),
+                 "prepared": bool(t.get("prepared")),
                  # la portada solo se manda cuando ya está lista: así la app
                  # muestra claramente cuáles faltan por preparar
-                 "art_url": t.get("art_url") if self._is_ready(t) else None}
+                 "art_url": t.get("art_url") if t.get("prepared") else None}
                 for t in self.queue
             ],
             "recent": list(self.history)[:8],
@@ -824,16 +740,41 @@ class BotCore:
     def _is_ready(t):
         return bool(t.get("stream_url")) and time.time() - t.get("resolved_at", 0) < STREAM_FRESH_S
 
+    # La cola tiene dos partes: arriba las PREPARADAS (listas para sonar,
+    # se pueden reordenar) y abajo las que todavía no (p. ej. el resto de una
+    # playlist de 200). Siempre suenan primero las preparadas, en su orden.
+    def _ready_count(self):
+        n = 0
+        for t in self.queue:
+            if not t.get("prepared"):
+                break
+            n += 1
+        return n
+
     def _enqueue(self, tracks):
         for t in tracks:
             t["uid"] = self._next_uid
             self._next_uid += 1
             t.pop("loading", None)
-            self.queue.append(t)
+            if "prepared" not in t:
+                t["prepared"] = bool(t.get("stream_url"))
+            if t["prepared"]:
+                # una canción ya lista (p. ej. del buscador) va al final de las listas
+                self.queue.insert(self._ready_count(), t)
+            else:
+                self.queue.append(t)
+
+    def _move_to_ready(self, item):
+        """Recién preparada: pasa al final del grupo de listas."""
+        try:
+            self.queue.remove(item)
+        except ValueError:
+            return
+        self.queue.insert(self._ready_count(), item)
 
     async def _prepare(self, item):
         """Deja lista UNA canción de la cola (su enlace de audio y portada)."""
-        if self._is_ready(item) or item.get("loading"):
+        if item.get("loading") or (item.get("prepared") and self._is_ready(item)):
             return
         item["loading"] = True
         self.on_change()
@@ -841,6 +782,9 @@ class BotCore:
             data = await extract(item["webpage_url"], title_hint=item.get("title"))
             data.pop("uid", None)
             item.update(data)
+            item["prepared"] = True
+            item.pop("failed", None)
+            self._move_to_ready(item)
         except Exception as e:
             item["failed"] = True
             log.warning("No se pudo preparar '%s': %s", item.get("title"), str(e)[:120])
@@ -849,16 +793,17 @@ class BotCore:
             self.on_change()
 
     def _prefetch_next(self):
-        """Deja listas las próximas PREFETCH_AHEAD canciones de la cola, DE A
-        UNA (para no saturar la VM). Si ya está trabajando, no arranca otro:
-        el que corre vuelve a mirar la cola después de cada canción."""
+        """Mantiene al menos PREFETCH_AHEAD canciones preparadas, tomando las
+        que faltan EN ORDEN y de a una (para no saturar la VM)."""
         if self._prefetch_task and not self._prefetch_task.done():
             return
 
         async def run():
             while True:
-                pending = [t for t in list(self.queue)[:PREFETCH_AHEAD]
-                           if not self._is_ready(t) and not t.get("loading") and not t.get("failed")]
+                if self._ready_count() >= PREFETCH_AHEAD:
+                    return
+                pending = [t for t in self.queue
+                           if not t.get("prepared") and not t.get("loading") and not t.get("failed")]
                 if not pending:
                     return
                 await self._prepare(pending[0])
@@ -965,14 +910,30 @@ class BotCore:
             await vc.disconnect(force=True)
         self.on_change()
 
-    async def action_queue_remove(self, index, who=None):
-        q = list(self.queue)
-        if 0 <= index < len(q):
-            gone = q.pop(index)
+    async def action_queue_remove(self, index, who=None, uid=None):
+        i, item = self._find(index, uid)
+        if item is not None:
+            q = list(self.queue)
+            gone = q.pop(i)
             self.queue = deque(q)
             self.log_activity(who, "remove", "quitó de la lista", title=gone.get("title"),
-                              sub=gone.get("uploader"), art=gone.get("art_url") if self._is_ready(gone) else None)
+                              sub=gone.get("uploader"), art=gone.get("art_url") if gone.get("prepared") else None)
             self._prefetch_next()
+
+    async def action_queue_move(self, uid, to_index, who=None):
+        """Reordenar: solo dentro del grupo de canciones preparadas."""
+        i, item = self._find(-1, uid)
+        if item is None or not item.get("prepared"):
+            return
+        n = self._ready_count()
+        to_index = max(0, min(n - 1, int(to_index)))
+        if to_index == i:
+            return
+        q = list(self.queue)
+        q.pop(i)
+        q.insert(to_index, item)
+        self.queue = deque(q)
+        self.log_activity(who, "move", "cambió el orden de la lista")
 
     async def action_queue_clear(self, who=None):
         """Vacía la cola sin tocar lo que está sonando ahora mismo."""

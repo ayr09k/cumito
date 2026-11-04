@@ -73,13 +73,17 @@ state = {
     "now_playing": {"title": LONG, "duration": 245, "elapsed": 61, "paused": False,
                     "art_url": None, "uploader": "Bad Bunny Oficial - Topic - Canal con nombre larguísimo"},
     "queue": [
-        {"uid": 1, "title": "Canción normal", "duration": 200, "uploader": "Artista", "ready": True},
+        {"uid": 1, "title": "Canción normal", "duration": 200, "uploader": "Artista", "ready": True, "prepared": True},
         {"uid": 2, "title": "Un título exageradamente largo que antes empujaba la equis fuera de la lista (Letra)",
-         "duration": 233, "uploader": "Un canal con un nombre también larguísimo de verdad", "ready": True},
+         "duration": 233, "uploader": "Un canal con un nombre también larguísimo de verdad", "ready": True,
+         "prepared": True},
+        {"uid": 5, "title": "La Bachata", "duration": 163, "uploader": "Manuel Turizo", "ready": True, "prepared": True},
+        {"uid": 4, "title": "Preparándose", "duration": 190, "uploader": "X", "ready": False, "loading": True,
+         "prepared": False},
         {"uid": 3, "title": "Otra más, todavía sin preparar, también con un nombre muy muy largo", "duration": 180,
-         "uploader": "Alguien", "ready": False},
-        {"uid": 4, "title": "Preparándose", "duration": 190, "uploader": "X", "ready": False, "loading": True},
-    ],
+         "uploader": "Alguien", "ready": False, "prepared": False},
+    ] + [{"uid": 100 + i, "title": f"Canción {i} de la playlist", "duration": 200, "uploader": "Artista",
+          "ready": False, "prepared": False} for i in range(1, 9)],
     "recent": [],
     "volume": 0.6,
 }
@@ -144,6 +148,20 @@ wait(1200)
 w._open_sheet()
 wait(600)
 shot(w, "06_playlist_abierta")
+# arrastrar "La Bachata" al primer lugar (a mitad del arrastre)
+from PySide6.QtCore import QPoint
+ql = w.sheet_list_widget
+row = ql._rows[5][0]
+start = row.mapToGlobal(QPoint(60, 23))
+ql._drag_start(row, start)
+wait(200)
+first = ql._rows[1][0]
+ql._drag_move(first.mapToGlobal(QPoint(70, 6)))
+wait(200)
+shot(w, "06b_arrastrando")
+ql._drag_end(first.mapToGlobal(QPoint(70, 6)))
+wait(200)
+shot(w, "06c_soltado")
 
 # borrar lista: aviso + botón a medias
 w._ask_clear_queue()

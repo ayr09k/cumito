@@ -20,7 +20,6 @@ import signal
 import sys
 
 from cumito_bot import config, protocol
-from cumito_bot.bot import BotCore
 from cumito_bot.relay import RelayServer
 
 RELAY_PORT = 8765
@@ -66,6 +65,9 @@ class CumitoServer:
     hace falta un hilo aparte porque no hay ninguna interfaz que proteger."""
 
     def __init__(self, cfg):
+        # se importa aquí (no arriba): los "ayudantes" que preparan canciones
+        # vuelven a leer este archivo al arrancar, y así no cargan Discord
+        from cumito_bot.bot import BotCore
         self.relay = RelayServer(RELAY_PORT, on_command=self._on_relay_command)
         self.bot = BotCore(
             cfg["token"], int(cfg["guild_id"]),
@@ -108,7 +110,9 @@ class CumitoServer:
         elif action == "stop_and_leave":
             await bot.action_stop_and_leave(who=who)
         elif action == "queue_remove":
-            await bot.action_queue_remove(int(data.get("index", -1)), who=who)
+            await bot.action_queue_remove(int(data.get("index", -1)), who=who, uid=data.get("uid"))
+        elif action == "queue_move":
+            await bot.action_queue_move(data.get("uid"), int(data.get("to", 0)), who=who)
         elif action == "queue_clear":
             await bot.action_queue_clear(who=who)
         elif action == "set_volume":
