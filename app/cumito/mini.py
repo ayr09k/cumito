@@ -333,27 +333,28 @@ class MiniWindow(QWidget):
         rg.setColorAt(0.98, QColor(0, 0, 0, 110))
         rg.setColorAt(1.0, QColor(0, 0, 0, 160))
         p.fillRect(pm.rect(), rg)
-        p.setBrush(Qt.NoBrush)
-        r = d / 2 - 3
-        k = 0
-        while r > d * 0.16:
-            p.setPen(QPen(QColor(0, 0, 0, 26 if k % 2 else 12), 1))
-            p.drawEllipse(QRectF(d / 2 - r, d / 2 - r, 2 * r, 2 * r))
-            r -= 2.8
-            k += 1
-        # etiqueta del centro (clarita, como en la referencia)
+        # como un CD: la portada llega casi hasta el centro, y en medio solo
+        # un aro chiquito transparente con el agujero
         c = d / 2
-        lr = d * 0.155
-        p.setPen(QPen(QColor(150, 150, 160), 1.5))
-        p.setBrush(QColor(200, 200, 208))
-        p.drawEllipse(QRectF(c - lr, c - lr, 2 * lr, 2 * lr))
-        ir = d * 0.105
-        p.setPen(QPen(QColor(170, 170, 178), 1))
-        p.setBrush(QColor(226, 226, 232))
-        p.drawEllipse(QRectF(c - ir, c - ir, 2 * ir, 2 * ir))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        p.drawEllipse(QRectF(1, 1, d - 2, d - 2))            # filo exterior
+        hub = d * 0.105
+        p.setPen(QPen(QColor(255, 255, 255, 90), 1))
+        p.setBrush(QColor(225, 228, 236, 150))               # aro transparente
+        p.drawEllipse(QRectF(c - hub, c - hub, 2 * hub, 2 * hub))
+        inner = d * 0.068
+        p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+        p.setBrush(QColor(200, 204, 214, 120))
+        p.drawEllipse(QRectF(c - inner, c - inner, 2 * inner, 2 * inner))
+        hole = d * 0.034
+        p.setCompositionMode(QPainter.CompositionMode_Clear)  # agujero de verdad
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(150, 150, 158))
-        p.drawEllipse(QRectF(c - 5, c - 5, 10, 10))
+        p.drawEllipse(QRectF(c - hole, c - hole, 2 * hole, 2 * hole))
+        p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(c - hole, c - hole, 2 * hole, 2 * hole))
         p.end()
         self._disc = pm
 
@@ -492,12 +493,15 @@ class MiniWindow(QWidget):
         p.restore()
         # brillo fijo (no gira)
         cg = QConicalGradient(c, 300)
-        for pos, a in ((0.0, 0), (0.06, 40), (0.13, 0), (0.45, 0), (0.52, 26), (0.6, 0), (1.0, 0)):
-            cg.setColorAt(pos, QColor(255, 255, 255, a))
+        for pos, col in ((0.0, (255, 255, 255, 0)), (0.04, (120, 200, 255, 34)), (0.08, (255, 255, 255, 46)),
+                         (0.12, (255, 150, 220, 30)), (0.17, (255, 255, 255, 0)),
+                         (0.47, (255, 255, 255, 0)), (0.51, (150, 255, 200, 22)), (0.55, (255, 255, 255, 32)),
+                         (0.59, (200, 160, 255, 22)), (0.64, (255, 255, 255, 0)), (1.0, (255, 255, 255, 0))):
+            cg.setColorAt(pos, QColor(*col))
         ring = QPainterPath()
         ring.addEllipse(c, DISC_R, DISC_R)
         inner = QPainterPath()
-        inner.addEllipse(c, DISC_R * 0.33, DISC_R * 0.33)
+        inner.addEllipse(c, DISC_R * 0.11, DISC_R * 0.11)
         p.fillPath(ring.subtracted(inner), cg)
 
         t = self._cover_t
