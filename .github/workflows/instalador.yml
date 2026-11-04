@@ -46,6 +46,10 @@ jobs:
         run: |
           $v = "${{ steps.ver.outputs.version }}"
           $s = "$env:CUMITO_SERVER".Trim()
+          if (-not $s) {
+            Write-Host "::error::Falta el secreto CUMITO_SERVER (Settings > Secrets and variables > Actions). Sin eso la app no sabria a donde conectarse."
+            exit 1
+          }
           $txt = "# Generado al construir. No editar.`nVERSION = `"$v`"`nSERVER = `"$s`"`n"
           [IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\app\cumito\build_info.py", $txt, (New-Object Text.UTF8Encoding $false))
 
