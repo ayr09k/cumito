@@ -336,18 +336,18 @@ class MiniWindow(QWidget):
         p.setBrush(Qt.NoBrush)
         r = d / 2 - 3
         k = 0
-        while r > d * 0.30:
+        while r > d * 0.16:
             p.setPen(QPen(QColor(0, 0, 0, 26 if k % 2 else 12), 1))
             p.drawEllipse(QRectF(d / 2 - r, d / 2 - r, 2 * r, 2 * r))
             r -= 2.8
             k += 1
         # etiqueta del centro (clarita, como en la referencia)
         c = d / 2
-        lr = d * 0.27
+        lr = d * 0.155
         p.setPen(QPen(QColor(150, 150, 160), 1.5))
         p.setBrush(QColor(200, 200, 208))
         p.drawEllipse(QRectF(c - lr, c - lr, 2 * lr, 2 * lr))
-        ir = d * 0.19
+        ir = d * 0.105
         p.setPen(QPen(QColor(170, 170, 178), 1))
         p.setBrush(QColor(226, 226, 232))
         p.drawEllipse(QRectF(c - ir, c - ir, 2 * ir, 2 * ir))
@@ -497,7 +497,7 @@ class MiniWindow(QWidget):
         ring = QPainterPath()
         ring.addEllipse(c, DISC_R, DISC_R)
         inner = QPainterPath()
-        inner.addEllipse(c, DISC_R * 0.56, DISC_R * 0.56)
+        inner.addEllipse(c, DISC_R * 0.33, DISC_R * 0.33)
         p.fillPath(ring.subtracted(inner), cg)
 
         t = self._cover_t

@@ -1,5 +1,6 @@
-## Cumito 1.6
+## Cumito 1.6.1
 
-- El buscador tiene dos pestañas: **Música** (como YouTube Music: primero las versiones de audio oficiales, con su artista y portada cuadrada) y **Todo** (YouTube normal: videos, en vivo, covers...). Viene en Música.
-- Nuevo mini **Disco** (Opciones → Modo streamer → Forma del mini): un vinilo con la portada de la canción que gira. Al pausar frena despacio como un tocadiscos, y al dar play vuelve a girar. Tocar el disco también pausa o reanuda.
-- La tarjeta de abajo del Disco es de vidrio oscuro: deja ver, desenfocado, lo que hay detrás de la ventana.
+- El mini **Disco** ahora es como la referencia: una tarjeta cuadrada con esquinas redondeadas y el vinilo grande girando arriba, con la mitad visible.
+- Abajo, centrados: las barritas (vuelven a Cumito normal), el artista, el título, una barrita de progreso chiquita y el tiempo "1 : 15 / 2:26".
+- Con el mouse encima, el tiempo cambia por atrás · pausa · siguiente.
+- Tocar el disco agranda la portada hasta llenar toda la tarjeta, y tocar otra vez la vuelve disco.
