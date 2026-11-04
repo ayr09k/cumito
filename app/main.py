@@ -142,21 +142,36 @@ class _UpdateController(QObject):
     def __init__(self, win, app):
         super().__init__(win)
         self.win, self.app, self.url = win, app, None
+        self._downloading = False
         self.updater = Updater(self)
+        # además de al abrir, se vuelve a mirar cada 30 min (por si Cumito
+        # se queda abierto todo el día)
+        self._every = QTimer(self)
+        self._every.setInterval(30 * 60 * 1000)
+        self._every.timeout.connect(self._periodic_check)
+        self._every.start()
         self.updater.available.connect(self._on_available)
         self.updater.progress.connect(self._on_progress)
         self.updater.failed.connect(self._on_failed)
         self.updater.ready.connect(self._on_ready)
         win.update_requested.connect(self._on_requested)
 
+    @Slot()
+    def _periodic_check(self):
+        if not self._downloading:
+            self.updater.check()
+
     @Slot(str, str)
     def _on_available(self, version, url):
+        if self._downloading:
+            return
         self.url = url
         QTimer.singleShot(1500, lambda: self.win.show_update(version))  # que la ventana ya esté a la vista
 
     @Slot()
     def _on_requested(self):
-        if self.url:
+        if self.url and not self._downloading:
+            self._downloading = True
             self.win.set_update_progress(0.0)
             self.updater.download(self.url)
 
@@ -166,6 +181,7 @@ class _UpdateController(QObject):
 
     @Slot(str)
     def _on_failed(self, message):
+        self._downloading = False
         self.win.set_update_failed(message)
 
     @Slot(str)

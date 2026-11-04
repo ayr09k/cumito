@@ -1,6 +1,4 @@
-## Cumito 1.2
+## Cumito 1.2.1
 
-- Si el servidor se reinicia (por una actualización o un corte), Cumito vuelve solo al canal y sigue la canción en el segundo en que iba, con la lista completa.
-- Nuevo en Ajustes: **Ver actividad**. Quién puso, saltó, pausó o quitó cada canción, estilo chat.
-- Arriba, donde dice "Cumito", aparece por 4 segundos lo último que pasó.
-- La portada de fondo se mueve muy lento de lado a lado.
+- Cumito revisa si hay versión nueva cada 30 minutos, aunque se quede abierto todo el día.
+- El servidor ya no se actualiza mientras suena música: espera a que se termine, para no cortarle la canción a nadie.
