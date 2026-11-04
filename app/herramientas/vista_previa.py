@@ -184,6 +184,12 @@ w.set_search_results("bad bunny", [
 ])
 wait(1500)
 shot(w, "11_buscador_titulos_largos")
+w._set_search_kind("all")
+w.set_search_results("bad bunny", [{"title": "Video oficial", "uploader": "Canal", "webpage_url": "x1"},
+                                   {"title": "En vivo", "uploader": "Canal", "webpage_url": "x2"}], kind="all")
+wait(900)
+shot(w, "11b_buscador_todo")
+w._set_search_kind("music")
 
 # vista previa de playlist con "No gracias" a medio mantener
 w._preview = {"url": "https://www.youtube.com/playlist?list=PL1"}
@@ -247,7 +253,7 @@ wait(200)
 shot(w, "16c_volver_a_apariencia")
 w._close_settings()
 wait(400)
-for shape in ("cuadrado", "vertical", "ancho", "circulo"):
+for shape in ("cuadrado", "vertical", "ancho", "circulo", "disco"):
     w.visual["mini_shape"] = shape
     w.visual["chroma"] = "#00B140" if shape == "circulo" else ""
     w.visual["mini_dim"] = 0.15
@@ -258,6 +264,9 @@ for shape in ("cuadrado", "vertical", "ancho", "circulo"):
     m.update()
     app.processEvents()
     m.grab().save(str(OUT / f"17_mini_{shape}.png"))
+    if shape == "disco":
+        wait(700)
+        m.grab().save(str(OUT / "17_mini_disco_girando.png"))
     print("foto mini", shape)
     w.exit_mini()
     wait(200)

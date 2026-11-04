@@ -1096,7 +1096,7 @@ class GlassScreen(QWidget):
     def send_command(self, action, **kw):
         pass
 
-    def do_search(self, query, limit=8, offset=0):
+    def do_search(self, query, limit=8, offset=0, kind="music"):
         pass
 
     def on_recent_searches_changed(self, searches):
@@ -1469,6 +1469,24 @@ class GlassScreen(QWidget):
         self.search_input.textChanged.connect(self._on_search_text_changed)
         shead.addWidget(self.search_input, 1)
         qlay.addLayout(shead)
+
+        # pestañas: "Música" (como YouTube Music: versiones de audio oficiales)
+        # y "Todo" (YouTube normal: videos, en vivo, covers...)
+        self._search_kind = "music"
+        tabs = QHBoxLayout()
+        tabs.setSpacing(8)
+        tabs.setContentsMargins(2, 2, 0, 2)
+        self.search_tabs = {}
+        for kind, text in (("music", "Música"), ("all", "Todo")):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(30)
+            b.clicked.connect(lambda _=False, k=kind: self._set_search_kind(k))
+            self.search_tabs[kind] = b
+            tabs.addWidget(b)
+        tabs.addStretch()
+        qlay.addLayout(tabs)
+        self._style_search_tabs()
 
         # 1) antes de buscar: búsquedas recientes + lo último que sonó
         self.search_home_widget = QWidget()
@@ -2407,7 +2425,7 @@ class GlassScreen(QWidget):
         self._search_count = 0
         self._clear_mosaic()
         self._show_search_state("loading")
-        self.do_search(query, 8, 0)
+        self.do_search(query, 8, 0, kind=self._search_kind)
 
     # ---- vista previa de playlist ----
     def show_playlist_preview(self, data):
@@ -2481,13 +2499,38 @@ class GlassScreen(QWidget):
         self._refresh_search_home()
         self._show_search_state("home")
 
+    def _style_search_tabs(self):
+        for kind, b in self.search_tabs.items():
+            on = kind == self._search_kind
+            b.setStyleSheet(
+                "QPushButton { border-radius: 10px; padding: 0 15px; font-size: 12.5px; font-weight: 700;"
+                + (" background: rgba(255,255,255,0.92); color: #141318; border: none; }"
+                   if on else
+                   " background: rgba(255,255,255,0.09); color: #F2F0F7; border: 1px solid rgba(255,255,255,0.10); }"
+                   "QPushButton:hover { background: rgba(255,255,255,0.16); }")
+            )
+
+    def _set_search_kind(self, kind):
+        if kind == self._search_kind:
+            return
+        self._search_kind = kind
+        self._style_search_tabs()
+        # si ya había una búsqueda, se repite en la pestaña nueva
+        if self._search_query and not self._preview and (
+                self.results_scroll.isVisible() or self.search_loader.isVisible()):
+            self._search_count = 0
+            self._clear_mosaic()
+            self.loader_label.setText("Buscando…")
+            self._show_search_state("loading")
+            self.do_search(self._search_query, 8, 0, kind=self._search_kind)
+
     def _search_more(self):
         if not self._search_query:
             return
         self.more_btn.setEnabled(False)
         self.more_btn.setText("Buscando más…")
         self.more_spinner.show()
-        self.do_search(self._search_query, 8, self._search_count)
+        self.do_search(self._search_query, 8, self._search_count, kind=self._search_kind)
 
     # ---- añadir desde el buscador: "Añadiendo…" -> "Añadido · #3" ----
     def _add_from_search(self, tile, result):
@@ -2532,9 +2575,11 @@ class GlassScreen(QWidget):
             if w:
                 w.deleteLater()
 
-    def set_search_results(self, query, results, offset=0):
+    def set_search_results(self, query, results, offset=0, kind=None):
         if self._panel_mode != "search" or query != self._search_query:
             return  # llegó tarde: ya se buscó otra cosa
+        if kind is not None and kind != self._search_kind:
+            return  # era de la otra pestaña
         if offset == 0:
             self._clear_mosaic()
             self._search_count = 0
@@ -2595,12 +2640,12 @@ class GlassScreen(QWidget):
                      "hint": "Encendido" if v["streamer"] else "Apagado"},
                     {"key": "menu:shape", "label": "Forma del mini", "icon": "shape_" + {
                         "cuadrado": "square", "vertical": "tall", "ancho": "wide",
-                        "circulo": "circle"}[v["mini_shape"]], "hint": SHAPE_NAMES[v["mini_shape"]]},
+                        "circulo": "circle", "disco": "disc"}[v["mini_shape"]], "hint": SHAPE_NAMES[v["mini_shape"]]},
                     {"key": "menu:chroma", "label": "Fondo para OBS", "icon": "palette",
                      "hint": CHROMAS.get(v["chroma"], "Sin fondo")}]
         if menu == "shape":
             icon = {"cuadrado": "shape_square", "vertical": "shape_tall", "ancho": "shape_wide",
-                    "circulo": "shape_circle"}
+                    "circulo": "shape_circle", "disco": "shape_disc"}
             return [back] + [{"key": "shape:" + k, "label": name, "icon": icon[k],
                               "hint": "Elegida" if v["mini_shape"] == k else None}
                              for k, name in SHAPE_NAMES.items()]

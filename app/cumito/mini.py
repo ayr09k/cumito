@@ -14,10 +14,13 @@ en OBS con el filtro "Chroma Key".
 """
 from __future__ import annotations
 
+import math
+import sys
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath,
+                           QPen, QPixmap, QRadialGradient, QRegion)
 from PySide6.QtWidgets import QWidget
 
 from . import icons, theme
@@ -27,8 +30,46 @@ SHAPES = {
     "vertical": (230, 470),
     "ancho": (470, 230),
     "circulo": (240, 240),
+    "disco": (250, 340),
 }
-SHAPE_NAMES = {"cuadrado": "Cuadrado", "vertical": "Vertical", "ancho": "Ancho", "circulo": "Círculo"}
+SHAPE_NAMES = {"cuadrado": "Cuadrado", "vertical": "Vertical", "ancho": "Ancho", "circulo": "Círculo",
+               "disco": "Disco"}
+
+# --- forma "disco": un vinilo con la portada que gira, y una tarjeta de vidrio ---
+DISC_D = 212            # diámetro del disco
+DISC_CY = 122           # centro del disco (y)
+CARD_TOP = 150          # donde empieza la tarjeta de abajo
+DISC_FPS = 24           # bajito a propósito: se ve fluido y casi no gasta
+DISC_DEG_S = 110.0      # velocidad de giro sonando
+SPIN_UP_S = 0.7         # cuánto tarda en agarrar velocidad al dar play
+SPIN_DOWN_S = 1.8       # cuánto tarda en frenar al pausar (lento, como un tocadiscos)
+CARD_TINT = QColor(7, 5, 12)   # negro con ~5% de morado
+
+
+def _set_blur_behind(widget, on):
+    """Windows: que lo transparente de la ventana muestre lo de atrás
+    desenfocado (vidrio de verdad). En otros sistemas no hace nada."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class ACCENT(ctypes.Structure):
+            _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
+                        ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
+
+        class DATA(ctypes.Structure):
+            _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.POINTER(ACCENT)),
+                        ("SizeOfData", ctypes.c_size_t)]
+
+        accent = ACCENT(3 if on else 0, 0, 0, 0)        # 3 = desenfocar lo de atrás
+        data = DATA(19, ctypes.pointer(accent), ctypes.sizeof(accent))   # 19 = WCA_ACCENT_POLICY
+        fn = ctypes.windll.user32.SetWindowCompositionAttribute
+        fn.argtypes = [wintypes.HWND, ctypes.POINTER(DATA)]
+        return bool(fn(int(widget.winId()), ctypes.byref(data)))
+    except Exception:
+        return False
 CHROMAS = {"": "Sin fondo", "#00B140": "Verde", "#0047BB": "Azul", "#FF00FF": "Magenta"}
 RADIUS = 30
 MARQUEE_PX_S = 28
@@ -64,6 +105,11 @@ class MiniWindow(QWidget):
         self._press = None
         self._marquee_x = 0.0
         self._marquee_last = time.monotonic()
+        self._disc = None              # el vinilo ya dibujado (cambia solo con la portada)
+        self._angle = 0.0
+        self._omega = 0.0              # velocidad actual (grados/s)
+        self._spin_last = time.monotonic()
+        self._blur_on = False
         self.setMouseTracking(True)
 
         self._f_title = QFont(theme.GLASS_FONT_FAMILY)
@@ -79,6 +125,9 @@ class MiniWindow(QWidget):
         self._marq = QTimer(self)         # el nombre deslizándose
         self._marq.setInterval(MARQUEE_MS)
         self._marq.timeout.connect(self._marquee_step)
+        self._spin = QTimer(self)
+        self._spin.setInterval(int(1000 / DISC_FPS))
+        self._spin.timeout.connect(self._spin_step)
         self.set_shape(shape)
 
     # ---------------- datos ----------------
@@ -89,6 +138,8 @@ class MiniWindow(QWidget):
         self._f_title.setPixelSize(15 if self._shape == "ancho" else 14)
         self._rescale_art()
         self._check_marquee()
+        self._apply_window_shape()
+        self._update_spin()
         self.update()
 
     def set_dim(self, value):
@@ -97,6 +148,7 @@ class MiniWindow(QWidget):
 
     def set_chroma(self, color):
         self._chroma = color or ""
+        self._apply_window_shape()
         self.update()
 
     def set_track(self, title, artist):
@@ -117,6 +169,7 @@ class MiniWindow(QWidget):
         self._dur = float(duration or 0)
         self._paused = bool(paused)
         self._clock_at = time.monotonic()
+        self._update_spin()
         self.update()
 
     def _rescale_art(self):
@@ -127,6 +180,7 @@ class MiniWindow(QWidget):
         w, h = self.width(), self.height()
         scaled = src.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
         self._art = scaled.copy((scaled.width() - w) // 2, (scaled.height() - h) // 2, w, h)
+        self._disc = None
 
     def _now_elapsed(self):
         e = self._elapsed
@@ -144,6 +198,8 @@ class MiniWindow(QWidget):
             return QRectF(30, h * 0.40, w - 60 - 46, 22)
         if s == "ancho":
             return QRectF(24, h * 0.36, w - 24 - 100, 24)
+        if s == "disco":
+            return QRectF(22, CARD_TOP + 52, w - 22 - 72, 22)
         return QRectF(22, h * 0.36, w - 22 - 72, 22)
 
     def _check_marquee(self):
@@ -167,11 +223,109 @@ class MiniWindow(QWidget):
         self._check_marquee()
         self._sec.start(1000)
         super().showEvent(ev)
+        self._apply_window_shape()
+        self._update_spin()
 
     def hideEvent(self, ev):
         self._marq.stop()
         self._sec.stop()
+        self._spin.stop()
         super().hideEvent(ev)
+
+    # ---------------- disco: forma de la ventana, vidrio y giro ----------------
+    def _disc_rect(self):
+        return QRectF((self.width() - DISC_D) / 2, DISC_CY - DISC_D / 2, DISC_D, DISC_D)
+
+    def _card_rect(self):
+        return QRectF(0, CARD_TOP, self.width(), self.height() - CARD_TOP)
+
+    def _apply_window_shape(self):
+        """En "disco" la ventana tiene la forma del disco + la tarjeta (así
+        el vidrio solo aparece en la tarjeta y no en un rectángulo entero).
+        Con fondo para OBS no: ahí va el color sólido alrededor."""
+        disco = self._shape == "disco" and not self._chroma
+        if disco:
+            card = QPainterPath()
+            card.addRoundedRect(self._card_rect(), 26, 26)
+            reg = QRegion(self._disc_rect().toRect(), QRegion.Ellipse)
+            reg = reg.united(QRegion(card.toFillPolygon().toPolygon()))
+            self.setMask(reg)
+        else:
+            self.clearMask()
+        if self.isVisible():
+            if disco and not self._blur_on:
+                self._blur_on = _set_blur_behind(self, True)
+            elif not disco and self._blur_on:
+                _set_blur_behind(self, False)
+                self._blur_on = False
+
+    def _update_spin(self):
+        if self._shape == "disco" and self.isVisible() and (not self._paused or self._omega > 0.5):
+            if not self._spin.isActive():
+                self._spin_last = time.monotonic()
+                self._spin.start()
+
+    def _spin_step(self):
+        now = time.monotonic()
+        dt = min(0.2, now - self._spin_last)
+        self._spin_last = now
+        target = 0.0 if self._paused else DISC_DEG_S
+        tau = SPIN_DOWN_S / 3 if target < self._omega else SPIN_UP_S / 3
+        self._omega += (target - self._omega) * (1 - math.exp(-dt / tau))
+        if self._paused and self._omega < 0.5:
+            self._omega = 0.0
+            self._spin.stop()
+        self._angle = (self._angle + self._omega * dt) % 360
+        self.update(self._disc_rect().toAlignedRect().adjusted(-2, -2, 2, 2))
+
+    def _make_disc(self):
+        """El vinilo: la portada impresa en todo el disco, con surcos encima
+        y el agujerito del centro. Se dibuja una sola vez por canción."""
+        d = DISC_D
+        pm = QPixmap(d, d)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        circle = QPainterPath()
+        circle.addEllipse(QRectF(0, 0, d, d))
+        p.setClipPath(circle)
+        src = self._art_src
+        if src is not None and not src.isNull():
+            sc = src.scaled(d, d, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            p.drawPixmap((d - sc.width()) // 2, (d - sc.height()) // 2, sc)
+        else:
+            g = QLinearGradient(0, 0, d, d)
+            g.setColorAt(0, QColor(theme.GLASS_GRAD_1))
+            g.setColorAt(1, QColor(theme.GLASS_GRAD_3))
+            p.fillRect(pm.rect(), g)
+        # un poco de negro de vinilo hacia el borde
+        rg = QRadialGradient(d / 2, d / 2, d / 2)
+        rg.setColorAt(0.0, QColor(0, 0, 0, 0))
+        rg.setColorAt(0.62, QColor(0, 0, 0, 40))
+        rg.setColorAt(0.97, QColor(0, 0, 0, 150))
+        rg.setColorAt(1.0, QColor(0, 0, 0, 200))
+        p.fillRect(pm.rect(), rg)
+        # surcos
+        p.setBrush(Qt.NoBrush)
+        r = d / 2 - 3
+        k = 0
+        while r > d * 0.20:
+            p.setPen(QPen(QColor(0, 0, 0, 34 if k % 2 else 18), 1))
+            p.drawEllipse(QRectF(d / 2 - r, d / 2 - r, 2 * r, 2 * r))
+            r -= 2.6
+            k += 1
+        # aro de la etiqueta y agujero
+        p.setPen(QPen(QColor(255, 255, 255, 50), 1.2))
+        lr = d * 0.19
+        p.drawEllipse(QRectF(d / 2 - lr, d / 2 - lr, 2 * lr, 2 * lr))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(18, 16, 22))
+        p.drawEllipse(QRectF(d / 2 - 7, d / 2 - 7, 14, 14))
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.drawEllipse(QRectF(d / 2 - 2.5, d / 2 - 2.5, 5, 5))
+        p.end()
+        self._disc = pm
 
     # ---------------- mouse ----------------
     def _hit(self, pt):
@@ -207,7 +361,7 @@ class MiniWindow(QWidget):
             return
         if key == "radio":
             self.expand.emit()
-        elif key == "pause":
+        elif key in ("pause", "disc"):
             self.play_pause.emit()
         elif key == "next":
             self.next_.emit()
@@ -229,6 +383,8 @@ class MiniWindow(QWidget):
         return path
 
     def paintEvent(self, ev):
+        if self._shape == "disco":
+            return self._paint_disco()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
@@ -265,6 +421,62 @@ class MiniWindow(QWidget):
             self._layout_circle(p, w, h)
         else:
             self._layout_card(p, w, h, wide=(s == "ancho"))
+        p.end()
+
+    def _paint_disco(self):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        w, h = self.width(), self.height()
+        if self._chroma:
+            p.fillRect(self.rect(), QColor(self._chroma))
+        if self._disc is None:
+            self._make_disc()
+        dr = self._disc_rect()
+        card = self._card_rect()
+        # el disco: solo la parte de arriba (lo demás queda "metido" en la tarjeta)
+        p.save()
+        p.setClipRect(QRectF(0, 0, w, card.top() + 12))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 70))
+        p.drawEllipse(dr.adjusted(2, 4, 2, 4))      # sombrita
+        p.translate(dr.center())
+        p.rotate(self._angle)
+        p.drawPixmap(QPointF(-DISC_D / 2, -DISC_D / 2), self._disc)
+        p.resetTransform()
+        # brillo fijo (no gira): así se nota que es un disco brillante
+        cg = QConicalGradient(dr.center(), 35)
+        for pos, a in ((0.0, 0), (0.07, 46), (0.15, 0), (0.5, 0), (0.57, 34), (0.65, 0), (1.0, 0)):
+            cg.setColorAt(pos, QColor(255, 255, 255, a))
+        ring = QPainterPath()
+        ring.addEllipse(dr)
+        inner = QPainterPath()
+        ri = DISC_D * 0.2
+        inner.addEllipse(dr.center(), ri, ri)
+        p.fillPath(ring.subtracted(inner), cg)
+        p.restore()
+
+        # la tarjeta: vidrio oscuro (negro con 5% de morado), deja ver lo de atrás
+        cpath = QPainterPath()
+        cpath.addRoundedRect(card, 26, 26)
+        tint = QColor(CARD_TINT)
+        tint.setAlpha(150 if self._blur_on else 228)
+        p.fillPath(cpath, tint)
+        p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        p.drawPath(cpath)
+        p.setPen(QPen(QColor(255, 255, 255, 70), 1))
+        p.drawLine(QPointF(card.left() + 26, card.top() + 0.5), QPointF(card.right() - 26, card.top() + 0.5))
+
+        self._hits = {"disc": QRectF(dr.left() + 30, dr.top() + 10, DISC_D - 60, card.top() - dr.top() - 14)}
+        self._radio(p, 34, card.top() + 30)
+        box = self._title_box()
+        self._texts(p, box)
+        self._pause_btn(p, w - 24 - 17, box.center().y() + 7, 34)
+        y = h - 32
+        self._skip(p, "prev", 36, y)
+        self._skip(p, "next", w - 36, y)
+        self._line_progress(p, 62, w - 62, y + 1)
         p.end()
 
     # --- piezas ---

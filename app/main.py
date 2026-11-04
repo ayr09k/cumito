@@ -81,9 +81,9 @@ class CumitoWindow(GlassScreen):
         if self.runtime:
             self.runtime.send("activity_list")
 
-    def do_search(self, query, limit=8, offset=0):
+    def do_search(self, query, limit=8, offset=0, kind="music"):
         if self.runtime:
-            self.runtime.send("search", query=query, limit=limit, offset=offset)
+            self.runtime.send("search", query=query, limit=limit, offset=offset, kind=kind)
 
     # ---------- conexión al servidor ----------
     def _connect(self):
@@ -113,7 +113,7 @@ class CumitoWindow(GlassScreen):
                     self.set_state({"connected": False, "now_playing": None, "queue": []})
             elif kind == "search_results":
                 self.set_search_results(payload.get("query"), payload.get("results") or [],
-                                        offset=int(payload.get("offset") or 0))
+                                        offset=int(payload.get("offset") or 0), kind=payload.get("kind"))
             elif kind == "playlist_preview":
                 self.show_playlist_preview(payload)
             elif kind == "activity_list":
