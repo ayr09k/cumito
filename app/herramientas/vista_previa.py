@@ -167,7 +167,11 @@ res.append(f"antes: {order()}")
 _send(row, QEvent.MouseButtonPress, p0, Qt.LeftButton)
 first = ql._rows[1][0]
 for k in range(1, 8):
-    _send(row, QEvent.MouseMove, p0 + QPoint(0, -k * 14), Qt.LeftButton)
+    # hacia la parte de arriba de la primera canción (calculado en cada paso)
+    tgt = first.mapToGlobal(QPoint(60, 6))
+    cur = row.mapToGlobal(QPoint(60, 23)) if k == 1 else tgt
+    _send(row, QEvent.MouseMove, cur + (tgt - cur) * k / 7 if k > 1 else cur + QPoint(0, -10), Qt.LeftButton)
+p0 = first.mapToGlobal(QPoint(60, 6)) + QPoint(0, 98)
 res.append(f"arrastrando: drag={'sí' if ql._drag else 'no'} cursor={'mano cerrada' if _QA.overrideCursor() else 'normal'} orden_durante={order()} cursor_pos={QCursor.pos().x()},{QCursor.pos().y()} esperado={(p0 + QPoint(0, -98)).x()},{(p0 + QPoint(0, -98)).y()}")
 res.append(f"scroll={w.sheet_scroll.verticalScrollBar().value()} alto_lista={w.sheet_scroll.viewport().height()}")
 res.append("centros: " + str([(ql._ready_lay.itemAt(i).widget().property('uid'), ql._ready_lay.itemAt(i).widget().mapTo(ql.ready_box, QPoint(0, 23)).y()) for i in range(ql._ready_lay.count())]) + f" y_mouse={ql.ready_box.mapFromGlobal(p0 + QPoint(0, -98)).y()}")
