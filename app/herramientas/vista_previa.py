@@ -267,6 +267,15 @@ for shape in ("cuadrado", "vertical", "ancho", "circulo", "disco"):
     if shape == "disco":
         wait(700)
         m.grab().save(str(OUT / "17_mini_disco_girando.png"))
+        m._inside = True
+        m.update()
+        m.grab().save(str(OUT / "17_mini_disco_mouse_encima.png"))
+        m._inside = False
+        m._on_cover_t(0.5)
+        m.grab().save(str(OUT / "17_mini_disco_portada_50.png"))
+        m._on_cover_t(1.0)
+        m.grab().save(str(OUT / "17_mini_disco_portada.png"))
+        m._on_cover_t(0.0)
     print("foto mini", shape)
     w.exit_mini()
     wait(200)
