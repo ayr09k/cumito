@@ -14,7 +14,7 @@ import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from . import theme
 
@@ -51,7 +51,7 @@ def _dur(s):
 class Ring(QWidget):
     def __init__(self, title, parent=None):
         super().__init__(parent)
-        self.setFixedSize(96, 112)
+        self.setFixedSize(92, 112)
         self._title = title
         self._pct = None
         self._sub = ""
@@ -63,7 +63,7 @@ class Ring(QWidget):
     def paintEvent(self, ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(14, 6, 68, 68)
+        r = QRectF(12, 6, 68, 68)
         p.setPen(QPen(QColor(255, 255, 255, 30), 7, Qt.SolidLine, Qt.RoundCap))
         p.drawArc(r, 0, 360 * 16)
         if self._pct is not None:
@@ -183,8 +183,13 @@ class Tile(QWidget):
         self.v.setStyleSheet("color:#fff; font-size:14px; font-weight:800; background:transparent; border:none;")
         self.s = QLabel("")
         self.s.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE}; font-size:10px; background:transparent; border:none;")
+        self.s.setWordWrap(True)
         for w in (self.l, self.v, self.s):
+            # que un texto largo no ensanche la tarjeta (ni la pantalla)
+            w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            w.setMinimumWidth(0)
             lay.addWidget(w)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
     def set(self, value, sub="", color=None):
         self.v.setText(value)
@@ -218,6 +223,7 @@ class StatusView(QWidget):
         self.b_title.setStyleSheet("color:#fff; font-size:14px; font-weight:800; background:transparent;")
         self.b_sub = QLabel("")
         self.b_sub.setWordWrap(True)
+        self.b_sub.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.b_sub.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE}; font-size:10.5px; background:transparent;")
         bt.addWidget(self.b_title)
         bt.addWidget(self.b_sub)
@@ -227,6 +233,7 @@ class StatusView(QWidget):
 
         rings = QHBoxLayout()
         rings.setSpacing(0)
+        rings.setContentsMargins(0, 0, 0, 0)
         self.r_cpu, self.r_mem, self.r_disk = Ring("Procesador"), Ring("Memoria"), Ring("Disco")
         for r in (self.r_cpu, self.r_mem, self.r_disk):
             rings.addWidget(r, 1, Qt.AlignHCenter)
@@ -389,6 +396,7 @@ class StatusView(QWidget):
             h.addWidget(pill, 0, Qt.AlignTop)
             m = QLabel(x.get("msg", ""))
             m.setWordWrap(True)
+            m.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             m.setStyleSheet("color: rgba(255,255,255,0.82); font-size:10.5px; background:transparent;")
             h.addWidget(m, 1)
             self.logs.addWidget(row)
