@@ -1,6 +1,3 @@
-## Cumito 1.6.1
+## Cumito 1.6.2
 
-- El mini **Disco** ahora es como la referencia: una tarjeta cuadrada con esquinas redondeadas y el vinilo grande girando arriba, con la mitad visible.
-- Abajo, centrados: las barritas (vuelven a Cumito normal), el artista, el título, una barrita de progreso chiquita y el tiempo "1 : 15 / 2:26".
-- Con el mouse encima, el tiempo cambia por atrás · pausa · siguiente.
-- Tocar el disco agranda la portada hasta llenar toda la tarjeta, y tocar otra vez la vuelve disco.
+- El mini **Disco** ahora parece un CD: la portada llega casi hasta el centro, que solo tiene un aro chiquito transparente con el agujero, y lleva un brillo tornasol suave.
