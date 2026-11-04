@@ -1020,7 +1020,9 @@ class GlassScreen(QWidget):
         self._last_cursor = None
         self._last_option = "activity"   # la rueda de opciones abre donde quedó
         # opciones visuales (main.py las guarda): modo streamer, forma del mini, fondo para OBS
-        self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": ""}
+        self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": "", "mini_dim": 0.3,
+                       "glass": True}
+        self.ui_scale = 1.0              # tamaño de toda la ventana (main.py lo aplica al abrir)
         self.mini = None                 # la ventanita del modo mini (si se abrió)
         self._now_art = None
         self._timer = QTimer(self)
@@ -1064,12 +1066,19 @@ class GlassScreen(QWidget):
         """main.py lo sobreescribe para guardar las opciones visuales."""
         pass
 
+    def on_scale_changed(self, scale):
+        """main.py lo sobreescribe: guarda el tamaño y reinicia Cumito."""
+        pass
+
     def set_visual(self, visual):
         self.visual.update({k: v for k, v in (visual or {}).items() if k in self.visual})
+        if bool(self.visual.get("glass", True)) != self._glass_on:
+            self._apply_glass(bool(self.visual.get("glass", True)))
         self._set_pills_visible(not self._empty_mode and not self._panel_mode)
         if self.mini is not None:
             self.mini.set_shape(self.visual["mini_shape"])
             self.mini.set_chroma(self.visual["chroma"])
+            self.mini.set_dim(self.visual["mini_dim"])
 
     def request_activity(self):
         """main.py lo sobreescribe: pide al servidor el registro completo."""
@@ -1600,7 +1609,7 @@ class GlassScreen(QWidget):
         sthead.addWidget(self.btn_settings_back)
         sthead.addStretch()
         stlay.addLayout(sthead)
-        st_title = QLabel("Opciones")
+        st_title = self.options_title = QLabel("Opciones")
         st_title.setStyleSheet("color:#fff; font-size:30px; font-weight:800; background:transparent;"
                                " padding-left:6px;")
         stlay.addWidget(st_title)
@@ -2540,38 +2549,73 @@ class GlassScreen(QWidget):
         stagger_fade_in(self, new_tiles)
 
     # ---- ajustes (pantalla propia) ----
-    def _option_items(self):
+    # ---------- la rueda de Opciones y sus secciones ----------
+    MENU_TITLES = {"main": "Opciones", "apariencia": "Apariencia", "size": "Tamaño",
+                   "streamer": "Modo streamer", "shape": "Forma del mini", "chroma": "Fondo para OBS",
+                   "dim": "Oscuridad"}
+    MENU_PARENT = {"apariencia": "main", "streamer": "main", "size": "apariencia",
+                   "shape": "streamer", "chroma": "streamer", "dim": "streamer"}
+    SCALES = [(1.0, "100%"), (0.9, "90%"), (0.8, "80%"), (0.7, "70%")]
+    DIMS = [(0.0, "Sin oscurecer"), (0.15, "15%"), (0.3, "30%"), (0.5, "50%"), (0.75, "75%"),
+            (1.0, "100%")]
+
+    @staticmethod
+    def _pct(value, table):
+        return min(table, key=lambda t: abs(t[0] - value))[1]
+
+    def _menu_items(self, menu):
+        v = self.visual
+        back = {"key": "back", "label": "Volver", "icon": "back_list"}
+        if menu == "apariencia":
+            return [back,
+                    {"key": "glass", "label": "Efecto vidrio", "icon": "sparkle",
+                     "hint": "Encendido" if self._glass_on else "Apagado"},
+                    {"key": "menu:size", "label": "Tamaño de Cumito", "icon": "resize",
+                     "hint": self._pct(self.ui_scale, self.SCALES)}]
+        if menu == "size":
+            return [back] + [{"key": f"scale:{val}", "label": name, "icon": "resize",
+                              "hint": "Actual" if abs(val - self.ui_scale) < 0.01 else None}
+                             for val, name in self.SCALES]
+        if menu == "streamer":
+            return [back,
+                    {"key": "streamer", "label": "Modo streamer", "icon": "streamer",
+                     "hint": "Encendido" if v["streamer"] else "Apagado"},
+                    {"key": "menu:shape", "label": "Forma del mini", "icon": "shape_" + {
+                        "cuadrado": "square", "vertical": "tall", "ancho": "wide",
+                        "circulo": "circle"}[v["mini_shape"]], "hint": SHAPE_NAMES[v["mini_shape"]]},
+                    {"key": "menu:chroma", "label": "Fondo para OBS", "icon": "palette",
+                     "hint": CHROMAS.get(v["chroma"], "Sin fondo")},
+                    {"key": "menu:dim", "label": "Oscuridad del mini", "icon": "dim",
+                     "hint": self._pct(v["mini_dim"], self.DIMS)}]
+        if menu == "shape":
+            icon = {"cuadrado": "shape_square", "vertical": "shape_tall", "ancho": "shape_wide",
+                    "circulo": "shape_circle"}
+            return [back] + [{"key": "shape:" + k, "label": name, "icon": icon[k],
+                              "hint": "Elegida" if v["mini_shape"] == k else None}
+                             for k, name in SHAPE_NAMES.items()]
+        if menu == "chroma":
+            return [back] + [{"key": "chroma:" + k, "label": name, "icon": "palette",
+                              "hint": "Elegido" if v["chroma"] == k else None}
+                             for k, name in CHROMAS.items()]
+        if menu == "dim":
+            return [back] + [{"key": f"dim:{val}", "label": name, "icon": "dim",
+                              "hint": "Elegida" if abs(val - v["mini_dim"]) < 0.01 else None}
+                             for val, name in self.DIMS]
+        # menú principal
         items = [{"key": "activity", "label": "Actividad", "icon": "chat"},
-                 {"key": "glass", "label": "Efecto vidrio", "icon": "sparkle",
-                  "hint": "Encendido" if self._glass_on else "Apagado"}]
+                 {"key": "menu:apariencia", "label": "Apariencia", "icon": "sparkle"},
+                 {"key": "menu:streamer", "label": "Modo streamer", "icon": "streamer",
+                  "hint": "Encendido" if v["streamer"] else "Apagado"}]
         for row in self.settings_rows():
             label, icon = (row, "settings") if isinstance(row, str) else row
             items.append({"key": "row:" + label, "label": label, "icon": icon})
-        v = self.visual
-        items.append({"key": "streamer", "label": "Modo streamer", "icon": "streamer",
-                      "hint": "Encendido" if v["streamer"] else "Apagado"})
-        items.append({"key": "shape", "label": "Forma del mini", "icon": "shape_" + {
-            "cuadrado": "square", "vertical": "tall", "ancho": "wide", "circulo": "circle"}[v["mini_shape"]],
-            "hint": SHAPE_NAMES[v["mini_shape"]]})
-        items.append({"key": "chroma", "label": "Fondo para OBS", "icon": "palette",
-                      "hint": CHROMAS.get(v["chroma"], "Sin fondo")})
         items.append({"key": "power", "label": "Apagar Cumito", "icon": "power", "danger": True})
         return items
 
-    def _shape_items(self):
-        icon = {"cuadrado": "shape_square", "vertical": "shape_tall", "ancho": "shape_wide", "circulo": "shape_circle"}
-        items = [{"key": "back", "label": "Volver", "icon": "back_list"}]
-        for k, name in SHAPE_NAMES.items():
-            items.append({"key": "shape:" + k, "label": name, "icon": icon[k],
-                          "hint": "Elegida" if self.visual["mini_shape"] == k else None})
-        return items
-
-    def _chroma_items(self):
-        items = [{"key": "back", "label": "Volver", "icon": "back_list"}]
-        for k, name in CHROMAS.items():
-            items.append({"key": "chroma:" + k, "label": name, "icon": "palette",
-                          "hint": "Elegido" if self.visual["chroma"] == k else None})
-        return items
+    def _show_menu(self, menu, keep_key=None):
+        self._menu = menu
+        self.options_title.setText(self.MENU_TITLES.get(menu, "Opciones"))
+        self.option_wheel.set_items(self._menu_items(menu), keep_key=keep_key)
 
     def _visual_changed(self):
         self.on_visual_changed(dict(self.visual))
@@ -2579,6 +2623,7 @@ class GlassScreen(QWidget):
         if self.mini is not None:
             self.mini.set_shape(self.visual["mini_shape"])
             self.mini.set_chroma(self.visual["chroma"])
+            self.mini.set_dim(self.visual["mini_dim"])
 
     def _open_settings(self):
         if self._panel_mode == "search":
@@ -2590,43 +2635,66 @@ class GlassScreen(QWidget):
         self._panel_mode = "settings"
         self._searching = True
         self._set_pills_visible(False)
-        self.option_wheel.set_items(self._option_items(), keep_key=self._last_option)
+        self._show_menu("main", keep_key=self._last_option)
         self._panel_in(self.settings_view)
         self.text_overlay.raise_()
         self.option_wheel.setFocus()
 
     def _on_option(self, key):
+        menu = getattr(self, "_menu", "main")
         if key == "back":
-            self.option_wheel.set_items(self._option_items(), keep_key=self._last_option)
+            parent = self.MENU_PARENT.get(menu, "main")
+            self._show_menu(parent, keep_key="menu:" + menu)
             return
-        if key.startswith("shape:"):
-            self.visual["mini_shape"] = key[6:]
+        if key.startswith("menu:"):
+            sub = key[5:]
+            if menu == "main":
+                self._last_option = key
+            cur = {"size": f"scale:{self.ui_scale}", "shape": "shape:" + self.visual["mini_shape"],
+                   "chroma": "chroma:" + self.visual["chroma"]}.get(sub)
+            if sub == "dim":
+                cur = "dim:" + str(min(self.DIMS, key=lambda t: abs(t[0] - self.visual["mini_dim"]))[0])
+            if sub == "size":
+                cur = "scale:" + str(min(self.SCALES, key=lambda t: abs(t[0] - self.ui_scale))[0])
+            self._show_menu(sub, keep_key=cur)
+            return
+        if key.startswith("shape:") or key.startswith("chroma:") or key.startswith("dim:"):
+            name, val = key.split(":", 1)
+            if name == "shape":
+                self.visual["mini_shape"] = val
+            elif name == "chroma":
+                self.visual["chroma"] = val
+            else:
+                self.visual["mini_dim"] = float(val)
             self._visual_changed()
-            self.option_wheel.set_items(self._option_items(), keep_key="shape")
+            self._show_menu("streamer", keep_key="menu:" + name)
             return
-        if key.startswith("chroma:"):
-            self.visual["chroma"] = key[7:]
-            self._visual_changed()
-            self.option_wheel.set_items(self._option_items(), keep_key="chroma")
+        if key.startswith("scale:"):
+            val = float(key[6:])
+            if abs(val - self.ui_scale) < 0.01:
+                self._show_menu("apariencia", keep_key="menu:size")
+                return
+            # el tamaño se aplica al abrir: Cumito se reinicia solo
+            self.on_scale_changed(val)
             return
-        self._last_option = key
         if key == "streamer":
             self.visual["streamer"] = not self.visual["streamer"]
             self._visual_changed()
-            self.option_wheel.set_items(self._option_items(), keep_key="streamer")
-        elif key == "shape":
-            self.option_wheel.set_items(self._shape_items(), keep_key="shape:" + self.visual["mini_shape"])
-        elif key == "chroma":
-            self.option_wheel.set_items(self._chroma_items(), keep_key="chroma:" + self.visual["chroma"])
+            self._show_menu(menu, keep_key="streamer")
         elif key == "glass":
             self._apply_glass(not self._glass_on)
-            self.option_wheel.set_items(self._option_items(), keep_key="glass")
+            self.visual["glass"] = self._glass_on
+            self._visual_changed()
+            self._show_menu(menu, keep_key="glass")
         elif key == "activity":
+            self._last_option = key
             self.open_activity()
         elif key == "power":
+            self._last_option = key
             self._close_settings()
             self._ask_stop_bot()
         elif key.startswith("row:"):
+            self._last_option = key
             self._close_settings()
             self.on_settings_row(key[4:])
 
@@ -2757,6 +2825,7 @@ class GlassScreen(QWidget):
             self.mini.move(self.pos())
         self.mini.set_shape(self.visual["mini_shape"])
         self.mini.set_chroma(self.visual["chroma"])
+        self.mini.set_dim(self.visual["mini_dim"])
         if self._now_art is not None:
             self.mini.set_art(self._now_art)
         self._sync_mini()

@@ -91,6 +91,8 @@ w.set_state(state)
 w._set_art_background(fake_art())
 wait(500)
 shot(w, "01_principal")
+if len(sys.argv) > 2 and sys.argv[2] == "solo":
+    sys.exit(0)
 
 # rueda de opciones
 w._open_settings()
@@ -221,17 +223,27 @@ w.visual["streamer"] = True
 w._set_pills_visible(True)
 shot(w, "14_streamer_boton_mini")
 w._open_settings()
-w.option_wheel.set_items(w._option_items(), keep_key="streamer")
+w._show_menu("main", keep_key="menu:apariencia")
 wait(300)
-shot(w, "15_opciones_streamer")
-w.option_wheel.set_items(w._shape_items(), keep_key="shape:circulo")
+shot(w, "15a_opciones_principal")
+w._on_option("menu:apariencia")
 wait(300)
-shot(w, "16_opciones_formas")
+shot(w, "15b_apariencia")
+w._on_option("menu:size")
+wait(300)
+shot(w, "15c_tamano")
+w._show_menu("streamer", keep_key="menu:dim")
+wait(300)
+shot(w, "15d_streamer")
+w._on_option("menu:dim")
+wait(300)
+shot(w, "16_oscuridad")
 w._close_settings()
 wait(400)
 for shape in ("cuadrado", "vertical", "ancho", "circulo"):
     w.visual["mini_shape"] = shape
     w.visual["chroma"] = "#00B140" if shape == "circulo" else ""
+    w.visual["mini_dim"] = 0.3
     w.enter_mini()
     wait(500)
     m = w.mini

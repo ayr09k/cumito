@@ -3,6 +3,7 @@ Cumito -- la app que usan todos (tú y tu grupo) para controlar la música.
 Se conecta al servidor donde vive el bot (Cumito-servidor, corriendo en
 tu VM) por la dirección que se configura una sola vez.
 """
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -60,6 +61,12 @@ class CumitoWindow(GlassScreen):
             self.cfg["display_name"] = text
             config.save(self.cfg)
             self._connect()
+
+    def on_scale_changed(self, scale):
+        self.cfg["ui_scale"] = scale
+        self.cfg["win_pos"] = [self.x(), self.y()]   # que vuelva a abrir en el mismo lugar
+        config.save(self.cfg)
+        QTimer.singleShot(150, _restart)
 
     def on_visual_changed(self, visual):
         self.cfg["visual"] = visual
@@ -199,14 +206,34 @@ class _UpdateController(QObject):
             return
         QTimer.singleShot(700, self.app.quit)
 
+def _restart():
+    """Vuelve a abrir Cumito (para aplicar el tamaño nuevo de la ventana)."""
+    from PySide6.QtCore import QProcess
+    if getattr(sys, "frozen", False):
+        QProcess.startDetached(sys.executable, ["--sin-bienvenida"])
+    else:
+        QProcess.startDetached(sys.executable, [str(Path(__file__).resolve()), "--sin-bienvenida"])
+    QApplication.instance().quit()
+
+
 def main():
     sys.excepthook = _log_uncaught
+    cfg = config.load()
+    # Tamaño de toda la ventana (Opciones -> Apariencia -> Tamaño). Qt lo
+    # aplica a todo por igual (textos, íconos, márgenes) si se pide ANTES de
+    # crear la app.
+    try:
+        scale = max(0.6, min(1.0, float(cfg.get("ui_scale") or 1.0)))
+    except (TypeError, ValueError):
+        scale = 1.0
+    if scale < 0.999:
+        os.environ["QT_SCALE_FACTOR"] = f"{scale:.2f}"
     app = QApplication(sys.argv)
     icon = QIcon(str(ICON_PATH))
     app.setWindowIcon(icon)
 
-    cfg = config.load()
     win = CumitoWindow(cfg)
+    win.ui_scale = scale
     win.setWindowIcon(icon)
 
     # La primera vez (sin nombre guardado) se muestra la bienvenida; las
@@ -239,11 +266,19 @@ def main():
     # ---- actualizaciones automáticas (ver cumito/updater.py) ----
     win._update_ctl = _UpdateController(win, app)
 
-    splash = Splash()
-    splash.setWindowIcon(icon)
-    splash.finished.connect(after_splash)
-    splash.finished.connect(win._update_ctl.updater.check)
-    splash.start()
+    if "--sin-bienvenida" in sys.argv and not first_time:
+        # se reinició solo (p. ej. al cambiar el tamaño): directo, sin el saludo
+        pos = cfg.get("win_pos")
+        if isinstance(pos, list) and len(pos) == 2:
+            win.move(int(pos[0]), int(pos[1]))
+        after_splash()
+        QTimer.singleShot(1500, win._update_ctl.updater.check)
+    else:
+        splash = Splash()
+        splash.setWindowIcon(icon)
+        splash.finished.connect(after_splash)
+        splash.finished.connect(win._update_ctl.updater.check)
+        splash.start()
 
     try:
         sys.exit(app.exec())

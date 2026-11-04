@@ -49,6 +49,7 @@ class MiniWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._shape = "cuadrado"
         self._chroma = chroma or ""
+        self._dim = 0.3            # cuánto velo oscuro (1.0 = el de antes)
         self._title = "Nada sonando"
         self._artist = ""
         self._art = None           # portada ya recortada al tamaño
@@ -88,6 +89,10 @@ class MiniWindow(QWidget):
         self._f_title.setPixelSize(15 if self._shape == "ancho" else 14)
         self._rescale_art()
         self._check_marquee()
+        self.update()
+
+    def set_dim(self, value):
+        self._dim = max(0.0, min(1.0, float(value)))
         self.update()
 
     def set_chroma(self, color):
@@ -241,13 +246,15 @@ class MiniWindow(QWidget):
             g.setColorAt(0.55, QColor(theme.GLASS_GRAD_3))
             g.setColorAt(1, QColor("#2A1B3D"))
             p.fillRect(self.rect(), g)
-        # velo para que todo se lea
-        p.fillRect(self.rect(), QColor(0, 0, 0, 70))
-        g2 = QLinearGradient(0, 0, 0, h)
-        g2.setColorAt(0.0, QColor(0, 0, 0, 60))
-        g2.setColorAt(0.45, QColor(0, 0, 0, 10))
-        g2.setColorAt(1.0, QColor(0, 0, 0, 130))
-        p.fillRect(self.rect(), g2)
+        # velo para que todo se lea (cuánto, se elige en Opciones)
+        k = self._dim
+        if k > 0:
+            p.fillRect(self.rect(), QColor(0, 0, 0, int(70 * k)))
+            g2 = QLinearGradient(0, 0, 0, h)
+            g2.setColorAt(0.0, QColor(0, 0, 0, int(60 * k)))
+            g2.setColorAt(0.45, QColor(0, 0, 0, int(10 * k)))
+            g2.setColorAt(1.0, QColor(0, 0, 0, int(130 * k)))
+            p.fillRect(self.rect(), g2)
         p.restore()
 
         self._hits = {}
@@ -293,29 +300,38 @@ class MiniWindow(QWidget):
         p.setOpacity(1.0)
         self._hits[key] = QRectF(cx - 16, cy - 16, 32, 32)
 
+    def _shadow_text(self, p, rect, align, text, color):
+        """Texto con una sombrita suave: así se lee aunque la portada sea
+        clara y el velo esté bajito."""
+        p.setPen(QColor(0, 0, 0, 120))
+        p.drawText(rect.translated(0, 1), align, text)
+        p.setPen(color)
+        p.drawText(rect, align, text)
+
     def _texts(self, p, box: QRectF, center=False):
         fm = QFontMetricsF(self._f_title)
         tw = fm.horizontalAdvance(self._title)
         p.save()
         p.setClipRect(box.adjusted(0, -4, 0, 4))
         p.setFont(self._f_title)
-        p.setPen(QColor(255, 255, 255, 240))
+        white = QColor(255, 255, 255, 245)
         if tw > box.width():
             gap = 34
             loop = tw + gap
             x0 = box.left() - (self._marquee_x % loop)
-            p.drawText(QRectF(x0, box.top(), tw + 2, box.height()), Qt.AlignVCenter | Qt.AlignLeft, self._title)
-            p.drawText(QRectF(x0 + loop, box.top(), tw + 2, box.height()), Qt.AlignVCenter | Qt.AlignLeft, self._title)
+            for x in (x0, x0 + loop):
+                self._shadow_text(p, QRectF(x, box.top(), tw + 2, box.height()), Qt.AlignVCenter | Qt.AlignLeft,
+                                  self._title, white)
         else:
             align = (Qt.AlignHCenter if center else Qt.AlignLeft) | Qt.AlignVCenter
-            p.drawText(box, align, self._title)
+            self._shadow_text(p, box, align, self._title, white)
         p.restore()
         p.setFont(self._f_artist)
-        p.setPen(QColor(255, 255, 255, 165))
         fa = QFontMetricsF(self._f_artist)
         artist = fa.elidedText(self._artist.upper(), Qt.ElideRight, box.width())
         ar = QRectF(box.left(), box.bottom() + 1, box.width(), 16)
-        p.drawText(ar, (Qt.AlignHCenter if center else Qt.AlignLeft) | Qt.AlignVCenter, artist)
+        self._shadow_text(p, ar, (Qt.AlignHCenter if center else Qt.AlignLeft) | Qt.AlignVCenter, artist,
+                          QColor(255, 255, 255, 200))
 
     def _frac(self):
         return (self._now_elapsed() / self._dur) if self._dur else 0.0
