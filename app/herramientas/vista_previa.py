@@ -105,7 +105,10 @@ w._close_settings()
 wait(500)
 
 # modo solo portada (8 s sin tocar nada)
-w._last_cursor = None
+from PySide6.QtGui import QCursor
+QCursor.setPos(5000, 5000)          # el mouse lejos de la ventana
+app.processEvents()
+w._last_cursor = QCursor.pos()
 w._set_idle(True)
 wait(900)
 shot(w, "01e_solo_portada")
