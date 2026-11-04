@@ -2615,7 +2615,10 @@ class GlassScreen(QWidget):
     def _show_menu(self, menu, keep_key=None):
         self._menu = menu
         self.options_title.setText(self.MENU_TITLES.get(menu, "Opciones"))
-        self.option_wheel.set_items(self._menu_items(menu), keep_key=keep_key)
+        items = self._menu_items(menu)
+        if keep_key is None and len(items) > 1 and items[0]["key"] == "back":
+            keep_key = items[1]["key"]   # al entrar a una sección: la primera opción, no "Volver"
+        self.option_wheel.set_items(items, keep_key=keep_key)
 
     def _visual_changed(self):
         self.on_visual_changed(dict(self.visual))
