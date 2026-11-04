@@ -196,7 +196,8 @@ class Tile(QWidget):
         self.s.setText(sub)
         self.s.setVisible(bool(sub))
         col = color.name() if isinstance(color, QColor) else (color or "#fff")
-        self.v.setStyleSheet(f"color:{col}; font-size:14px; font-weight:800; background:transparent; border:none;")
+        size = 14 if len(value) <= 14 else 12
+        self.v.setStyleSheet(f"color:{col}; font-size:{size}px; font-weight:800; background:transparent; border:none;")
 
 
 class StatusView(QWidget):
