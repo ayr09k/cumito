@@ -47,6 +47,7 @@ from .wheel import OptionWheel
 from .mini import CHROMAS, SHAPE_NAMES, MiniWindow
 from .dim_editor import DimEditor
 from .queue_list import QueueList
+from .status_view import StatusView
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -1142,6 +1143,10 @@ class GlassScreen(QWidget):
         """main.py lo sobreescribe: pide al servidor el registro completo."""
         pass
 
+    def request_status(self):
+        """main.py lo sobreescribe: pide al servidor cómo está la VM."""
+        pass
+
     def settings_rows(self):
         return []
 
@@ -1738,6 +1743,39 @@ class GlassScreen(QWidget):
         self.activity_scroll = _bare_scroll(self.activity_feed)
         alay.addWidget(self.activity_scroll, 1)
 
+        # ---- estado del servidor (salud de la VM, en vivo) ----
+        self.status_panel = _GlassPanel(self, top_radius=22, tint_alpha=172)
+        self.status_panel.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        self.status_panel.hide()
+        sv = QVBoxLayout(self.status_panel)
+        sv.setContentsMargins(14, 8, 8, 0)
+        sv.setSpacing(6)
+        sv.addLayout(self._handle_row())
+        shd = QHBoxLayout()
+        shd.setSpacing(10)
+        self.btn_status_back = _IconButton("back", size=30)
+        self.btn_status_back.clicked.connect(self._close_status)
+        self._chrome_widgets.append(self.btn_status_back)
+        shd.addWidget(self.btn_status_back)
+        stt = QVBoxLayout()
+        stt.setSpacing(0)
+        s_title = QLabel("Estado del servidor")
+        s_title.setStyleSheet("color:#fff; font-size:17px; font-weight:800; background:transparent;")
+        self.status_live = QLabel("● En vivo")
+        self.status_live.setStyleSheet("color:#3DDC84; font-size:10.5px; font-weight:700; background:transparent;")
+        stt.addWidget(s_title)
+        stt.addWidget(self.status_live)
+        shd.addLayout(stt)
+        shd.addStretch()
+        sv.addLayout(shd)
+        self.status_view = StatusView()
+        self.status_scroll = _bare_scroll(self.status_view)
+        sv.addWidget(self.status_scroll, 1)
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(2000)
+        self._status_timer.timeout.connect(self._status_tick)
+        self._status_last = 0.0
+
         # ---- mini-reproductor (durante el buscador) ----
         self.mini_player = _GlassPanel(self, tint_alpha=175)
         self.mini_player.setGeometry(0, H - 58, W, 58)
@@ -1765,7 +1803,7 @@ class GlassScreen(QWidget):
         )
 
         self._chrome_widgets += [self.playlist_sheet, self.search_view, self.settings_view, self.activity_view,
-                                 self.mini_player]
+                                 self.status_panel, self.mini_player]
 
         # ---- aviso de actualización (baja desde arriba como notificación) ----
         self._build_update_banner()
@@ -1894,7 +1932,8 @@ class GlassScreen(QWidget):
         return row
 
     def _repaint_panels(self):
-        for w in (self.playlist_sheet, self.search_view, self.settings_view, self.activity_view, self.mini_player):
+        for w in (self.playlist_sheet, self.search_view, self.settings_view, self.activity_view,
+                  self.status_panel, self.mini_player):
             w.update()
 
     # ================= switch de glass =================
@@ -1998,7 +2037,52 @@ class GlassScreen(QWidget):
             lambda: self.send_command("stop_and_leave"),
         )
 
+    def open_status(self):
+        for mode, w in (("search", self.search_view), ("settings", self.settings_view),
+                        ("activity", self.activity_view)):
+            if self._panel_mode == mode:
+                w.hide()
+        self.mini_player.hide()
+        self._close_sheet()
+        self._panel_mode = "status"
+        self._searching = True
+        self._set_pills_visible(False)
+        self._status_opened = time.monotonic()
+        if self._status_last == 0.0:
+            self.status_view.set_waiting()
+        self._panel_in(self.status_panel)
+        self.text_overlay.raise_()
+        self.request_status()
+        self._status_timer.start()
+
+    def _status_tick(self):
+        if self._panel_mode != "status":
+            self._status_timer.stop()
+            return
+        self.request_status()
+        # sin respuesta en un rato: probablemente el servidor aún no tiene el visor
+        last = self._status_last or self._status_opened
+        if time.monotonic() - last > 6:
+            self.status_view.set_waiting(long=True)
+            self.status_live.setText("● Sin respuesta")
+            self.status_live.setStyleSheet("color:#F2B23A; font-size:10.5px; font-weight:700; background:transparent;")
+
+    def set_server_status(self, data):
+        self._status_last = time.monotonic()
+        self.status_live.setText("● En vivo")
+        self.status_live.setStyleSheet("color:#3DDC84; font-size:10.5px; font-weight:700; background:transparent;")
+        if self._panel_mode == "status":
+            self.status_view.set_data(data)
+
+    def _close_status(self):
+        self._status_timer.stop()
+        self._panel_out(self.status_panel)
+        self._after_panel_closed()
+
     def open_activity(self):
+        if self._panel_mode == "status":
+            self._status_timer.stop()
+            self.status_panel.hide()
         if self._panel_mode == "search":
             self.search_view.hide()
             self.mini_player.hide()
@@ -2322,6 +2406,9 @@ class GlassScreen(QWidget):
 
     # ---- buscador ----
     def _open_search(self):
+        if self._panel_mode == "status":
+            self._status_timer.stop()
+            self.status_panel.hide()
         if self._panel_mode == "settings":
             self.settings_view.hide()
         if self._panel_mode == "activity":
@@ -2689,6 +2776,7 @@ class GlassScreen(QWidget):
                              for val, name in self.DIMS]
         # menú principal
         items = [{"key": "activity", "label": "Actividad", "icon": "chat"},
+                 {"key": "status", "label": "Estado del servidor", "icon": "pulse"},
                  {"key": "menu:apariencia", "label": "Apariencia", "icon": "sparkle"},
                  {"key": "menu:streamer", "label": "Modo streamer", "icon": "streamer",
                   "hint": "Encendido" if v["streamer"] else "Apagado"}]
@@ -2745,6 +2833,9 @@ class GlassScreen(QWidget):
             self.mini.set_dim(self.visual["mini_dim"])
 
     def _open_settings(self):
+        if self._panel_mode == "status":
+            self._status_timer.stop()
+            self.status_panel.hide()
         if self._panel_mode == "search":
             self.search_view.hide()
             self.mini_player.hide()
@@ -2807,6 +2898,9 @@ class GlassScreen(QWidget):
             self._show_menu(menu, keep_key="glass")
         elif key == "dim_editor":
             self._show_dim_editor()
+        elif key == "status":
+            self._last_option = key
+            self.open_status()
         elif key == "activity":
             self._last_option = key
             self.open_activity()
@@ -2833,6 +2927,9 @@ class GlassScreen(QWidget):
                 return
             if self._panel_mode == "activity":
                 self._close_activity()
+                return
+            if self._panel_mode == "status":
+                self._close_status()
                 return
         super().keyPressEvent(ev)
 

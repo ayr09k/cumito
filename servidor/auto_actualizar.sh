@@ -40,7 +40,7 @@ sincronizar() {  # $1 = "ver" (solo listar) o "copiar"
 import filecmp, os, shutil, sys
 src, dst, modo = sys.argv[1], sys.argv[2], sys.argv[3]
 NUNCA = {"config.json", "cookies.txt", "history.json", "session.json", "activity.json",
-         "ffmpeg.log", ".ytdlp_dia", ".actualizacion_pendiente"}
+         "ffmpeg.log", ".ytdlp_dia", ".actualizacion_pendiente", ".version", ".forzar", ".forzado"}
 for root, dirs, files in os.walk(src):
     dirs[:] = [d for d in dirs if d not in (".venv", "__pycache__")]
     rel = os.path.relpath(root, src)
@@ -69,6 +69,17 @@ if [ -z "$CAMBIOS" ] && [ "$TOCA_YTDLP" = 0 ]; then
   exit 0
 fi
 
+# "actualizar YA": si en GitHub hay una orden nueva en servidor/.forzar, se
+# actualiza aunque esté sonando música (Cumito retoma la canción solo)
+FORZAR="$(cat "$REPO_DIR/servidor/.forzar" 2>/dev/null || true)"
+FORZADO="$(cat "$CARPETA/.forzado" 2>/dev/null || true)"
+FORZAR_YA=0
+if [ -n "$FORZAR" ] && [ "$FORZAR" != "$FORZADO" ]; then
+  FORZAR_YA=1
+  echo "$FORZAR" | como tee "$CARPETA/.forzado" >/dev/null
+  echo "Orden de actualizar ya: $FORZAR"
+fi
+
 # 3) ¿está sonando algo? (Cumito lo anota en session.json)
 SONANDO="$(como python3 - "$CARPETA/session.json" <<'PY'
 import json, sys
@@ -78,7 +89,7 @@ except Exception:
     print(0)
 PY
 )"
-if [ "$SONANDO" = 1 ] && systemctl is-active -q cumito; then
+if [ "$SONANDO" = 1 ] && [ "$FORZAR_YA" = 0 ] && systemctl is-active -q cumito; then
   [ -f "$PENDIENTE" ] || date +%s | como tee "$PENDIENTE" >/dev/null
   DESDE="$(cat "$PENDIENTE" 2>/dev/null || date +%s)"
   if [ $(( $(date +%s) - DESDE )) -lt "$ESPERA_MAX_S" ]; then
@@ -110,6 +121,8 @@ if [ "$TOCA_YTDLP" = 1 ]; then
   echo "$HOY" | como tee "$MARCA" >/dev/null
 fi
 rm -f "$PENDIENTE"
+# qué versión quedó (se ve en Cumito -> Estado del servidor)
+como git -C "$REPO_DIR" log -1 --format='%h · %cs' | como tee "$CARPETA/.version" >/dev/null || true
 
 if [ "$REINICIAR" = 1 ]; then
   echo "Cumito actualizado:"; printf '%s\n' "$COPIADOS"

@@ -81,6 +81,10 @@ class CumitoWindow(GlassScreen):
         if self.runtime:
             self.runtime.send("activity_list")
 
+    def request_status(self):
+        if self.runtime:
+            self.runtime.send("status")
+
     def do_search(self, query, limit=8, offset=0, kind="music"):
         if self.runtime:
             self.runtime.send("search", query=query, limit=limit, offset=offset, kind=kind)
@@ -118,6 +122,8 @@ class CumitoWindow(GlassScreen):
                 self.show_playlist_preview(payload)
             elif kind == "activity_list":
                 self.set_activity_list(payload.get("entries") or [])
+            elif kind == "status":
+                self.set_server_status(payload)
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb):

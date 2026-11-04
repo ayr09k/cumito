@@ -240,9 +240,37 @@ w.set_activity_list([
 ])
 wait(900)
 shot(w, "13_actividad")
-# modo streamer: opciones y las 4 formas del mini
+# estado del servidor (datos de ejemplo)
 w._close_activity()
 wait(400)
+import math as _m
+w.open_status()
+wait(450)
+_now = time.time()
+w.set_server_status({
+    "cpu": 23.5, "cpu_hist": [max(2, 18 + 14 * _m.sin(i / 6) + (40 if 60 < i < 66 else 0)) for i in range(90)],
+    "steal": 6, "steal_hist": [3 + 4 * abs(_m.sin(i / 9)) for i in range(90)], "cores": 2,
+    "load": [0.42, 0.37, 0.30], "mem": {"total": 1_000_000_000, "used": 610_000_000},
+    "swap": {"total": 2_000_000_000, "used": 180_000_000}, "disk": {"total": 47_000_000_000, "used": 9_800_000_000},
+    "uptime_vm": 5 * 86400 + 3600 * 4, "uptime_bot": 3600 * 2 + 600, "bot_rss": 160_000_000,
+    "helpers": {"n": 2, "rss": 120_000_000}, "discord": {"ready": True, "ping": 48, "voice": "General"},
+    "listeners": 3, "queue": {"total": 14, "prepared": 5, "loading": 1, "failed": 0},
+    "playing": "Ojitos Lindos", "versions": {"server": "a1b2c3d · 2026-11-04", "yt_dlp": "2026.10.22"},
+    "update_pending": False, "time": _now,
+    "logs": [{"t": _now - 300, "lvl": "INFO", "src": "bot", "msg": "Reproduciendo: Ojitos Lindos"},
+             {"t": _now - 120, "lvl": "WARNING", "src": "bot",
+              "msg": "YouTube no dejó sacar 'X' (Sign in to confirm). Probando en SoundCloud..."},
+             {"t": _now - 30, "lvl": "INFO", "src": "bot", "msg": "Sesión anterior recuperada: 12 canciones"}],
+})
+wait(300)
+shot(w, "18_estado_servidor")
+w.status_scroll.verticalScrollBar().setValue(10000)
+wait(200)
+shot(w, "18b_estado_servidor_abajo")
+w._close_status()
+wait(400)
+
+# modo streamer: opciones y las 4 formas del mini
 w.visual["streamer"] = True
 w._set_pills_visible(True)
 shot(w, "14_streamer_boton_mini")

@@ -68,6 +68,8 @@ class CumitoServer:
         # se importa aquí (no arriba): los "ayudantes" que preparan canciones
         # vuelven a leer este archivo al arrancar, y así no cargan Discord
         from cumito_bot.bot import BotCore
+        from cumito_bot.salud import Salud
+        self.salud = Salud()
         self.relay = RelayServer(RELAY_PORT, on_command=self._on_relay_command)
         self.bot = BotCore(
             cfg["token"], int(cfg["guild_id"]),
@@ -119,6 +121,13 @@ class CumitoServer:
             await bot.action_set_volume(data.get("value", 0.6), who=who)
         elif action == "play_index":
             await bot.action_play_index(int(data.get("index", -1)), uid=data.get("uid"), who=who)
+        elif action == "status":
+            # la salud de la VM, solo para quien la pidió (Opciones -> Estado del servidor)
+            if ws is not None:
+                try:
+                    await ws.send(protocol.dumps("status", **self.salud.snapshot(bot, self.relay)))
+                except Exception:
+                    pass
         elif action == "activity_list":
             # el historial completo, solo para quien lo pidió (Ajustes > Actividad)
             if ws is not None:
@@ -142,6 +151,7 @@ class CumitoServer:
                     pass
 
     async def run(self):
+        asyncio.create_task(self.salud.run())
         await self.relay.start()
         print(f"Relay escuchando en el puerto {RELAY_PORT}. Conectando el bot a Discord...")
         try:

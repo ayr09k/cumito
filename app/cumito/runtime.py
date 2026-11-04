@@ -26,7 +26,7 @@ class CumitoRuntime:
         # estado (se difunde solo) y los resultados de una búsqueda propia
         # (respuesta directa). Los separamos por su "type" antes de meterlos
         # en la cola que lee la ventana.
-        kind = data.get("type") if data.get("type") in ("search_results", "playlist_preview", "activity_list") else "state"
+        kind = data.get("type") if data.get("type") in ("search_results", "playlist_preview", "activity_list", "status") else "state"
         self.events.put((kind, data))
 
     def start(self):
