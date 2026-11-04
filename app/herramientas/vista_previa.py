@@ -164,6 +164,7 @@ order = lambda: [ql._ready_lay.itemAt(i).widget().property("uid") for i in range
 row = ql._rows[5][0]
 p0 = row.mapToGlobal(QPoint(60, 23))
 res.append(f"antes: {order()}")
+_win_pos0 = w.pos()
 _send(row, QEvent.MouseButtonPress, p0, Qt.LeftButton)
 first = ql._rows[1][0]
 for k in range(1, 8):
@@ -178,6 +179,7 @@ res.append("centros: " + str([(ql._ready_lay.itemAt(i).widget().property('uid'),
 # soltar sobre OTRO widget (antes esto dejaba todo colgado)
 _send(w, QEvent.MouseButtonRelease, p0 + QPoint(0, -98), Qt.NoButton)
 wait(100)
+res.append(f"la ventana se movió: {'SÍ (mal)' if w.pos() != _win_pos0 else 'no'}")
 res.append(f"después de soltar: drag={'COLGADO' if ql._drag else 'terminado'} cursor={'COLGADO' if _QA.overrideCursor() else 'normal'} orden={order()}")
 # cancelar con Esc
 row = ql._rows[2][0]

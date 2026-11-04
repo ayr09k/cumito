@@ -561,11 +561,13 @@ class _TrackRow(QWidget):
         self.thumb.setPixmap(_with_ready_border(pm, 8) if flash else pm)
 
     # tocar = clic al SOLTAR (así se puede agarrar y arrastrar sin activarla)
+    # La fila se queda con el clic (no lo pasa a la ventana): así agarrar una
+    # canción NO arrastra también toda la ventana.
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
             self._press = ev.globalPosition().toPoint()
             self._dragging = False
-        super().mousePressEvent(ev)
+        ev.accept()
 
     def mouseMoveEvent(self, ev):
         if self._press is not None and ev.buttons() & Qt.LeftButton:
@@ -576,7 +578,7 @@ class _TrackRow(QWidget):
                 self._dragging = True
                 self.drag_started.emit(self._press)
                 self.drag_moved.emit(gp)
-        super().mouseMoveEvent(ev)
+        ev.accept()
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton and self._press is not None:
@@ -587,7 +589,7 @@ class _TrackRow(QWidget):
                 self.clicked.emit()
         self._press = None
         self._dragging = False
-        super().mouseReleaseEvent(ev)
+        ev.accept()
 
 
 class _Tile(QWidget):
@@ -2939,6 +2941,8 @@ class GlassScreen(QWidget):
             self._drag_pos = ev.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, ev):
+        if getattr(self.sheet_list_widget, "_drag", None) is not None:
+            return  # moviendo una canción: la ventana se queda quieta
         if self._drag_pos is not None and ev.buttons() & Qt.LeftButton:
             self.move(ev.globalPosition().toPoint() - self._drag_pos)
 
