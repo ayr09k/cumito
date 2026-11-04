@@ -232,18 +232,25 @@ shot(w, "15b_apariencia")
 w._on_option("menu:size")
 wait(300)
 shot(w, "15c_tamano")
-w._show_menu("streamer", keep_key="menu:dim")
+w._show_menu("apariencia", keep_key="dim_editor")
 wait(300)
-shot(w, "15d_streamer")
-w._on_option("menu:dim")
-wait(300)
-shot(w, "16_oscuridad")
+shot(w, "15d_apariencia_oscuridad")
+w._on_option("dim_editor")
+wait(400)
+shot(w, "16_oscuridad_15")
+w.dim_editor.slider.setValue(0.6, emit=True)
+wait(200)
+shot(w, "16b_oscuridad_60")
+w.dim_editor.slider.setValue(0.15, emit=True)
+w._options_back()
+wait(200)
+shot(w, "16c_volver_a_apariencia")
 w._close_settings()
 wait(400)
 for shape in ("cuadrado", "vertical", "ancho", "circulo"):
     w.visual["mini_shape"] = shape
     w.visual["chroma"] = "#00B140" if shape == "circulo" else ""
-    w.visual["mini_dim"] = 0.3
+    w.visual["mini_dim"] = 0.15
     w.enter_mini()
     wait(500)
     m = w.mini

@@ -45,6 +45,7 @@ from .activity import ActivityFeed, Ticker
 from .hold import HoldButton, HoldConfirm
 from .wheel import OptionWheel
 from .mini import CHROMAS, SHAPE_NAMES, MiniWindow
+from .dim_editor import DimEditor
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -1020,8 +1021,8 @@ class GlassScreen(QWidget):
         self._last_cursor = None
         self._last_option = "activity"   # la rueda de opciones abre donde quedó
         # opciones visuales (main.py las guarda): modo streamer, forma del mini, fondo para OBS
-        self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": "", "mini_dim": 0.3,
-                       "glass": True}
+        self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": "", "mini_dim": 0.15,
+                       "mini_dim_set": False, "glass": True}
         self.ui_scale = 1.0              # tamaño de toda la ventana (main.py lo aplica al abrir)
         self.mini = None                 # la ventanita del modo mini (si se abrió)
         self._now_art = None
@@ -1072,6 +1073,8 @@ class GlassScreen(QWidget):
 
     def set_visual(self, visual):
         self.visual.update({k: v for k, v in (visual or {}).items() if k in self.visual})
+        if not self.visual.get("mini_dim_set"):
+            self.visual["mini_dim"] = 0.15   # el valor de fábrica nuevo (antes era 30%)
         if bool(self.visual.get("glass", True)) != self._glass_on:
             self._apply_glass(bool(self.visual.get("glass", True)))
         self._set_pills_visible(not self._empty_mode and not self._panel_mode)
@@ -1604,7 +1607,7 @@ class GlassScreen(QWidget):
         sthead = QHBoxLayout()
         sthead.setSpacing(10)
         self.btn_settings_back = _IconButton("back", size=30)
-        self.btn_settings_back.clicked.connect(self._close_settings)
+        self.btn_settings_back.clicked.connect(self._options_back)
         self._chrome_widgets.append(self.btn_settings_back)
         sthead.addWidget(self.btn_settings_back)
         sthead.addStretch()
@@ -1613,13 +1616,21 @@ class GlassScreen(QWidget):
         st_title.setStyleSheet("color:#fff; font-size:30px; font-weight:800; background:transparent;"
                                " padding-left:6px;")
         stlay.addWidget(st_title)
-        st_sub = QLabel("Gira la rueda del mouse\ny toca la que quieras")
+        st_sub = self.options_sub = QLabel("Gira la rueda del mouse\ny toca la que quieras")
         st_sub.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:11px; background:transparent;"
                              " padding-left:7px;")
         stlay.addWidget(st_sub)
         self.option_wheel = OptionWheel()
         self.option_wheel.activated.connect(self._on_option)
         stlay.addWidget(self.option_wheel, 1)
+        self.dim_editor = DimEditor()
+        self.dim_editor.changed.connect(self._on_dim_changed)
+        self.dim_editor.hide()
+        stlay.addWidget(self.dim_editor, 1)
+        self._dim_save = QTimer(self)
+        self._dim_save.setSingleShot(True)
+        self._dim_save.setInterval(400)
+        self._dim_save.timeout.connect(lambda: self.on_visual_changed(dict(self.visual)))
 
         # ---- actividad: otra hoja, estilo chat ----
         self.activity_view = _GlassPanel(self, top_radius=22, tint_alpha=170)
@@ -2554,7 +2565,7 @@ class GlassScreen(QWidget):
                    "streamer": "Modo streamer", "shape": "Forma del mini", "chroma": "Fondo para OBS",
                    "dim": "Oscuridad"}
     MENU_PARENT = {"apariencia": "main", "streamer": "main", "size": "apariencia",
-                   "shape": "streamer", "chroma": "streamer", "dim": "streamer"}
+                   "shape": "streamer", "chroma": "streamer", "dim": "apariencia"}
     SCALES = [(1.0, "100%"), (0.9, "90%"), (0.8, "80%"), (0.7, "70%")]
     DIMS = [(0.0, "Sin oscurecer"), (0.15, "15%"), (0.3, "30%"), (0.5, "50%"), (0.75, "75%"),
             (1.0, "100%")]
@@ -2571,7 +2582,9 @@ class GlassScreen(QWidget):
                     {"key": "glass", "label": "Efecto vidrio", "icon": "sparkle",
                      "hint": "Encendido" if self._glass_on else "Apagado"},
                     {"key": "menu:size", "label": "Tamaño de Cumito", "icon": "resize",
-                     "hint": self._pct(self.ui_scale, self.SCALES)}]
+                     "hint": self._pct(self.ui_scale, self.SCALES)},
+                    {"key": "dim_editor", "label": "Oscuridad del mini", "icon": "dim",
+                     "hint": f"{round(v['mini_dim'] * 100)}%"}]
         if menu == "size":
             return [back] + [{"key": f"scale:{val}", "label": name, "icon": "resize",
                               "hint": "Actual" if abs(val - self.ui_scale) < 0.01 else None}
@@ -2584,9 +2597,7 @@ class GlassScreen(QWidget):
                         "cuadrado": "square", "vertical": "tall", "ancho": "wide",
                         "circulo": "circle"}[v["mini_shape"]], "hint": SHAPE_NAMES[v["mini_shape"]]},
                     {"key": "menu:chroma", "label": "Fondo para OBS", "icon": "palette",
-                     "hint": CHROMAS.get(v["chroma"], "Sin fondo")},
-                    {"key": "menu:dim", "label": "Oscuridad del mini", "icon": "dim",
-                     "hint": self._pct(v["mini_dim"], self.DIMS)}]
+                     "hint": CHROMAS.get(v["chroma"], "Sin fondo")}]
         if menu == "shape":
             icon = {"cuadrado": "shape_square", "vertical": "shape_tall", "ancho": "shape_wide",
                     "circulo": "shape_circle"}
@@ -2612,8 +2623,38 @@ class GlassScreen(QWidget):
         items.append({"key": "power", "label": "Apagar Cumito", "icon": "power", "danger": True})
         return items
 
+    def _show_dim_editor(self):
+        self._menu = "dim"
+        self.options_title.setText("Oscuridad del mini")
+        self.options_sub.setText("Arrastra la barrita o usa\nla rueda del mouse")
+        self.option_wheel.hide()
+        self.dim_editor.show()
+        np = self.state.get("now_playing") or {}
+        self.dim_editor.open(self.visual["mini_dim"], self.visual["mini_shape"], self.visual["chroma"],
+                             self._now_art, np.get("title") or "Nada sonando", np.get("uploader") or "Cumito")
+
+    def _on_dim_changed(self, value):
+        self.visual["mini_dim"] = round(value, 3)
+        self.visual["mini_dim_set"] = True
+        if self.mini is not None:
+            self.mini.set_dim(value)
+        self._dim_save.start()
+
+    def _options_back(self):
+        """La flechita de arriba: sube un nivel (o cierra si ya está en el principal)."""
+        menu = getattr(self, "_menu", "main")
+        if menu == "main":
+            self._close_settings()
+            return
+        parent = self.MENU_PARENT.get(menu, "main")
+        self._show_menu(parent, keep_key="dim_editor" if menu == "dim" else "menu:" + menu)
+
     def _show_menu(self, menu, keep_key=None):
         self._menu = menu
+        self.dim_editor.hide()
+        self.option_wheel.show()
+        self.options_sub.setText("Gira la rueda del mouse\ny toca la que quieras")
+        self.option_wheel.setFocus()
         self.options_title.setText(self.MENU_TITLES.get(menu, "Opciones"))
         items = self._menu_items(menu)
         if keep_key is None and len(items) > 1 and items[0]["key"] == "back":
@@ -2689,6 +2730,8 @@ class GlassScreen(QWidget):
             self.visual["glass"] = self._glass_on
             self._visual_changed()
             self._show_menu(menu, keep_key="glass")
+        elif key == "dim_editor":
+            self._show_dim_editor()
         elif key == "activity":
             self._last_option = key
             self.open_activity()
@@ -2711,7 +2754,7 @@ class GlassScreen(QWidget):
                 self._close_search()
                 return
             if self._panel_mode == "settings":
-                self._close_settings()
+                self._options_back()
                 return
             if self._panel_mode == "activity":
                 self._close_activity()
