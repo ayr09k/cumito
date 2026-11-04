@@ -1,8 +1,4 @@
-## Cumito 1.8
+## Cumito 1.8.1
 
-- Nuevo en Opciones: **Estado del servidor**. La salud de la VM en vivo (se actualiza cada 2 segundos mientras está abierta):
-  - un aviso general: Todo bien / Un poco cargado / Con problemas, con el porqué;
-  - anillos de procesador, memoria y disco;
-  - el procesador de los últimos 3 minutos, y si Oracle está limitando la VM;
-  - Discord (y su ping), canal de voz, apps conectadas, la lista, cuánto lleva encendido, memoria, swap, carga y versiones;
-  - el registro con los últimos avisos y errores del servidor.
+- Arreglado: al agarrar una canción de la playlist para reordenarla, a veces se quedaba "colgada" y había que cerrar Cumito. Ahora soltar en cualquier lado (o Esc) siempre la suelta.
+- El desplazamiento automático al arrastrar cerca del borde ahora es más suave y solo actúa en el borde.
