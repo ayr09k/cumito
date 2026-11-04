@@ -42,6 +42,7 @@ from . import icons, theme
 from .anim_widgets import HopLoader, Spinner, stagger_fade_in
 from .art_cache import ArtCache
 from .activity import ActivityFeed, Ticker
+from .hold import HoldButton, HoldConfirm
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -303,6 +304,127 @@ class _Equalizer(QWidget):
             p.drawRect(i * 7, self.height() - h, 4, h)
 
 
+class _ElidedLabel(QLabel):
+    """Un texto de una sola línea que NUNCA se sale de su espacio: si no
+    cabe, se corta con "…" (y el nombre completo sale al dejar el mouse
+    encima). Así un título larguísimo no empuja la X ni nada más."""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self._full = text or ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(1)
+        self._apply()
+
+    def setText(self, text):
+        self._full = text or ""
+        self._apply()
+
+    def text(self):
+        return self._full
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._apply()
+
+    def changeEvent(self, ev):
+        super().changeEvent(ev)
+        if ev.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._apply()
+
+    def _apply(self):
+        fm = self.fontMetrics()
+        shown = fm.elidedText(self._full, Qt.ElideRight, max(1, self.width()))
+        QLabel.setText(self, shown)
+        self.setToolTip(self._full if shown != self._full else "")
+
+
+class _SwipeHint(QWidget):
+    """El "PLAYLIST" de abajo: cada 3 segundos unas flechitas suben y se
+    desvanecen (como el gesto de deslizar hacia arriba). Se puede tocar
+    para abrir la playlist."""
+    clicked = Signal()
+    EVERY_MS = 3000
+    RUN_MS = 1300
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(96, 34)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
+        self._t = -1.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setDuration(self.RUN_MS)
+        self._anim.valueChanged.connect(self._on_value)
+        self._anim.finished.connect(self._on_done)
+        self._every = QTimer(self)
+        self._every.setInterval(self.EVERY_MS)
+        self._every.timeout.connect(self._play)
+        self._every.start()
+        self._font = QFont(theme.GLASS_FONT_FAMILY)
+        self._font.setPixelSize(9)
+        self._font.setBold(True)
+        self._font.setLetterSpacing(QFont.AbsoluteSpacing, 1.2)
+
+    def _play(self):
+        if self.isVisible() and self.window().isVisible() and not self.window().isMinimized():
+            self._anim.start()
+
+    def _on_value(self, v):
+        self._t = float(v)
+        self.update()
+
+    def _on_done(self):
+        self._t = -1.0
+        self.update()
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self.rect().contains(ev.position().toPoint()):
+            self.clicked.emit()
+
+    def _chevron(self, p, cx, cy, alpha, width=7.0):
+        if alpha <= 0:
+            return
+        pen = QPen(QColor(255, 255, 255, int(alpha)), 1.8)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(cx - width, cy + width * 0.55)
+        path.lineTo(cx, cy - width * 0.45)
+        path.lineTo(cx + width, cy + width * 0.55)
+        p.drawPath(path)
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        cx = self.width() / 2
+        hover = self.underMouse()
+        if hover:
+            bg = QPainterPath()
+            bg.addRoundedRect(QRectF(4, 0, self.width() - 8, self.height()), 12, 12)
+            p.fillPath(bg, QColor(255, 255, 255, 22))
+        if self._t < 0:
+            # en reposo: una flechita tenue
+            self._chevron(p, cx, 9, 120 if hover else 85)
+        else:
+            # dos flechitas que suben una detrás de otra y se desvanecen
+            for k, delay in enumerate((0.0, 0.22)):
+                u = (self._t - delay) / 0.78
+                if 0 <= u <= 1:
+                    y = 15 - 13 * u
+                    alpha = 255 * math.sin(math.pi * u) * (0.95 if k == 0 else 0.7)
+                    self._chevron(p, cx, y, alpha)
+            # la de reposo se apaga mientras pasa la animación
+            self._chevron(p, cx, 9, 85 * max(0.0, 1 - self._t * 4) if self._t < 0.25 else 85 * max(0.0, (self._t - 0.8) / 0.2))
+        p.setFont(self._font)
+        p.setPen(QColor(255, 255, 255, 170 if hover else 128))
+        p.drawText(QRectF(0, 17, self.width(), 16), Qt.AlignHCenter | Qt.AlignVCenter, "PLAYLIST")
+        p.end()
+
+
 class _TrackRow(QWidget):
     clicked = Signal()
     remove_clicked = Signal()
@@ -352,7 +474,7 @@ class _TrackRow(QWidget):
 
         info = QVBoxLayout()
         info.setSpacing(1)
-        title_lbl = QLabel(title)
+        title_lbl = _ElidedLabel(title)
         title_lbl.setStyleSheet(
             f"color:{theme.GLASS_ACCENT if active else theme.GLASS_TEXT}; "
             "font-size:12px; font-weight:600; background:transparent;"
@@ -361,7 +483,7 @@ class _TrackRow(QWidget):
             artist = "Aún no lista · tócala para prepararla"
         elif status == "loading":
             artist = "Preparando…"
-        artist_lbl = QLabel(artist or "")
+        artist_lbl = _ElidedLabel(artist or "")
         artist_lbl.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10.5px; background:transparent;")
         if status != "ready":
             title_lbl.setStyleSheet(
@@ -431,10 +553,9 @@ class _Tile(QWidget):
         self.art.setStyleSheet("background:transparent;")
         lay.addWidget(self.art)
 
-        t = QLabel(title)
+        t = _ElidedLabel(title)
         t.setStyleSheet(f"color:{theme.GLASS_TEXT}; font-size:11.5px; font-weight:700; background:transparent;")
-        t.setWordWrap(False)
-        a = QLabel(artist or "")
+        a = _ElidedLabel(artist or "")
         a.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10px; background:transparent;")
         lay.addWidget(t)
         lay.addWidget(a)
@@ -1019,7 +1140,7 @@ class GlassScreen(QWidget):
 
         self.btn_stop_bot = _IconButton("power", danger=True)
         self.btn_stop_bot.setToolTip("Detener bot (sale del canal de voz)")
-        self.btn_stop_bot.clicked.connect(lambda: self.send_command("stop_and_leave"))
+        self.btn_stop_bot.clicked.connect(self._ask_stop_bot)
         row.addWidget(self.btn_stop_bot)
 
         self.btn_settings = _IconButton("settings")
@@ -1059,17 +1180,12 @@ class GlassScreen(QWidget):
         nlay.setSpacing(12)
         nlay.addStretch()
 
-        hint_icon = QLabel()
-        hint_icon.setPixmap(icons.pixmap("chevron_up", "#8C8A93", 14))
-        hint_icon.setAlignment(Qt.AlignCenter)
-        hint_icon.setStyleSheet("background:transparent;")
-        hint = QLabel("PLAYLIST")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 9px; font-weight:700; letter-spacing:1px; background:transparent;")
-        hint_box = QVBoxLayout()
-        hint_box.setSpacing(0)
-        hint_box.addWidget(hint_icon)
-        hint_box.addWidget(hint)
+        self.swipe_hint = _SwipeHint()
+        self.swipe_hint.clicked.connect(self._open_sheet)
+        hint_box = QHBoxLayout()
+        hint_box.addStretch()
+        hint_box.addWidget(self.swipe_hint)
+        hint_box.addStretch()
         nlay.addLayout(hint_box)
 
         mini_row = QHBoxLayout()
@@ -1079,9 +1195,9 @@ class GlassScreen(QWidget):
         mini_row.addWidget(self.mini_thumb)
         mini_info = QVBoxLayout()
         mini_info.setSpacing(0)
-        self.now_title = QLabel("Nada sonando")
+        self.now_title = _ElidedLabel("Nada sonando")
         self.now_title.setStyleSheet("color:#fff; font-size:16px; font-weight:800; background:transparent;")
-        self.now_artist = QLabel("Agrega algo con el buscador")
+        self.now_artist = _ElidedLabel("Agrega algo con el buscador")
         self.now_artist.setStyleSheet("color: rgba(255,255,255,0.62); font-size:12.5px; background:transparent;")
         mini_info.addWidget(self.now_title)
         mini_info.addWidget(self.now_artist)
@@ -1216,17 +1332,20 @@ class GlassScreen(QWidget):
         head_lbl.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE}; font-size:11px; font-weight:700; letter-spacing:1px; background:transparent;")
         sheet_head.addWidget(head_lbl)
         sheet_head.addStretch()
-        self.btn_clear_queue = QPushButton("")
-        self.btn_clear_queue.setFixedSize(26, 26)
+        self.btn_clear_queue = QPushButton(" Borrar lista")
+        self.btn_clear_queue.setFixedHeight(28)
         self.btn_clear_queue.setCursor(Qt.PointingHandCursor)
-        self.btn_clear_queue.setToolTip("Vaciar cola (no detiene lo que suena)")
-        self.btn_clear_queue.setIcon(icons.icon("trash", "#A9A6B2", 15))
-        self.btn_clear_queue.setIconSize(QSize(15, 15))
+        self.btn_clear_queue.setToolTip("Quita todas las canciones de la lista (lo que suena sigue sonando)")
+        self.btn_clear_queue.setIcon(icons.icon("trash", "#E9A0A0", 14))
+        self.btn_clear_queue.setIconSize(QSize(14, 14))
         self.btn_clear_queue.setStyleSheet(
-            "QPushButton { background:transparent; border:none; border-radius:13px; }"
-            "QPushButton:hover { background: rgba(228,91,91,0.35); }"
+            "QPushButton { background: rgba(228,91,91,0.14); border:1px solid rgba(228,91,91,0.30);"
+            " border-radius:14px; color:#F1B3B3; font-size:11px; font-weight:700; padding:0 12px 0 9px; }"
+            "QPushButton:hover { background: rgba(228,91,91,0.30); color:#fff; }"
+            "QPushButton:disabled { background: rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
+            " color: rgba(255,255,255,0.3); }"
         )
-        self.btn_clear_queue.clicked.connect(lambda: self.send_command("queue_clear"))
+        self.btn_clear_queue.clicked.connect(self._ask_clear_queue)
         sheet_head.addWidget(self.btn_clear_queue)
         slay.addLayout(sheet_head)
 
@@ -1389,8 +1508,9 @@ class GlassScreen(QWidget):
         self.preview_single = _pbtn("Solo esta canción")
         self.preview_single.clicked.connect(self._preview_single_song)
         prow.addWidget(self.preview_single)
-        self.preview_no = _pbtn("No gracias")
-        self.preview_no.clicked.connect(self._preview_cancel)
+        # "No gracias" descarta la playlist: también se mantiene presionado
+        self.preview_no = HoldButton("No gracias", height=38, font_size=12, strong=False)
+        self.preview_no.confirmed.connect(self._preview_cancel)
         prow.addWidget(self.preview_no)
         pvl.addLayout(prow)
         qlay.addWidget(self.preview_box, 1)
@@ -1470,9 +1590,9 @@ class GlassScreen(QWidget):
         mplay.addWidget(self.mp_thumb)
         mp_info = QVBoxLayout()
         mp_info.setSpacing(0)
-        self.mp_title = QLabel("Nada sonando")
+        self.mp_title = _ElidedLabel("Nada sonando")
         self.mp_title.setStyleSheet(f"color:{theme.GLASS_TEXT}; font-size:11.5px; font-weight:700; background:transparent;")
-        self.mp_artist = QLabel("")
+        self.mp_artist = _ElidedLabel("")
         self.mp_artist.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10px; background:transparent;")
         mp_info.addWidget(self.mp_title)
         mp_info.addWidget(self.mp_artist)
@@ -1492,6 +1612,9 @@ class GlassScreen(QWidget):
 
         # ---- cuadro de texto flotante (encima de todo lo demás) ----
         self.text_overlay = _GlassTextOverlay(self)
+
+        # ---- el aviso "¿Seguro?" con botón de mantener presionado ----
+        self.hold_confirm = HoldConfirm(self)
 
     # ================= pintado de capas =================
     def _paint_scrim(self, label: QLabel, top: bool):
@@ -1690,6 +1813,27 @@ class GlassScreen(QWidget):
         if new_id and (not first or time.time() - float(a.get("ts") or 0) < 15):
             self.ticker.show_activity(a)
 
+    # ---- lo peligroso se confirma manteniendo presionado ----
+    def _ask_clear_queue(self):
+        n = len(self.state.get("queue") or [])
+        if not n:
+            return
+        self.hold_confirm.ask(
+            "¿Seguro que quieres borrar TODO?",
+            f"Se van a quitar {'la canción' if n == 1 else f'las {n} canciones'} de la lista. "
+            "Lo que está sonando ahora sigue sonando.",
+            "Mantén presionado para borrar", "trash",
+            lambda: self.send_command("queue_clear"),
+        )
+
+    def _ask_stop_bot(self):
+        self.hold_confirm.ask(
+            "¿Apagar a Cumito?",
+            "Se detiene la música, se borra la lista y Cumito sale del canal de voz.",
+            "Mantén presionado para apagar", "power",
+            lambda: self.send_command("stop_and_leave"),
+        )
+
     def open_activity(self):
         if self._panel_mode == "search":
             self.search_view.hide()
@@ -1871,6 +2015,7 @@ class GlassScreen(QWidget):
 
         np = self.state.get("now_playing")
         queue = self.state.get("queue", [])
+        self.btn_clear_queue.setEnabled(bool(queue))
         rows = []
         if np:
             row = _TrackRow(np["title"], np.get("uploader") or "", np.get("duration"),
@@ -2191,6 +2336,7 @@ class GlassScreen(QWidget):
             self.preview_add.hide()
             self.preview_single.setVisible("v=" in url or "youtu.be/" in url)
             self.preview_no.setText("Volver")
+            self.preview_no.hold_required = False   # aquí no hay nada que descartar
         else:
             self.preview_question.setText("¿Quieres poner esta playlist?")
             name = data.get("title") or "Playlist"
@@ -2199,13 +2345,15 @@ class GlassScreen(QWidget):
             self.preview_add.setText(f"Añadir las {len(entries)}")
             self.preview_single.setVisible("v=" in url or "youtu.be/" in url)
             self.preview_no.setText("No gracias")
+            self.preview_no.hold_required = True
+            self.preview_no.reset()
             pix = []
             for e in entries[:3]:
                 self.art_cache.request(e.get("art_url"))
                 pix.append(self.art_cache.get(e.get("art_url")))
             self.preview_stack.set_cards(pix, name, f"{len(entries)} canciones")
             for i, e in enumerate(entries, 1):
-                lbl = QLabel(f"{i}.  {e.get('title') or 'Sin título'}")
+                lbl = _ElidedLabel(f"{i}.  {e.get('title') or 'Sin título'}")
                 lbl.setStyleSheet(f"color:{theme.GLASS_TEXT}; font-size:12px; background:transparent; padding:3px 0;")
                 lay.addWidget(lbl)
         lay.addStretch()
