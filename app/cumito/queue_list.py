@@ -293,13 +293,21 @@ class QueueList(QWidget):
         ghost.move(win.mapFromGlobal(gpos) - self._drag["off"])
         QApplication.setOverrideCursor(Qt.ClosedHandCursor)
         QApplication.instance().installEventFilter(self)
+        if not hasattr(self, "_scroll_timer"):
+            self._scroll_timer = QTimer(self)
+            self._scroll_timer.setInterval(40)
+            self._scroll_timer.timeout.connect(self._autoscroll)
+        self._scroll_timer.start()
 
     def eventFilter(self, obj, ev):
         d = self._drag
         if d is not None:
             t = ev.type()
             if t == QEvent.MouseMove:
-                self._drag_move(QCursor.pos())
+                try:
+                    self._drag_move(ev.globalPosition().toPoint())
+                except Exception:
+                    self._drag_move(QCursor.pos())
             elif t == QEvent.MouseButtonRelease:
                 QTimer.singleShot(0, lambda: self._drag_end(QCursor.pos()))
             elif t == QEvent.ApplicationDeactivate or (t == QEvent.KeyPress and ev.key() == Qt.Key_Escape):
@@ -321,21 +329,35 @@ class QueueList(QWidget):
         if lay.indexOf(row) != target:
             lay.removeWidget(row)
             lay.insertWidget(target, row)
-        # si se acerca a los bordes, la lista se desplaza sola
-        if self._scroll is not None:
-            vp = self._scroll.viewport()
-            vy = vp.mapFromGlobal(gpos).y()
-            bar = self._scroll.verticalScrollBar()
-            if vy < 28:
-                bar.setValue(bar.value() - 10)
-            elif vy > vp.height() - 28:
-                bar.setValue(bar.value() + 10)
+
+    def _autoscroll(self):
+        """Si la canción agarrada está pegada al borde de arriba o de abajo
+        de la lista (y DENTRO de ella), la lista se desplaza sola, de a
+        poquito. Va con su propio reloj, no con cada movimiento del mouse."""
+        d = self._drag
+        if d is None or self._scroll is None:
+            return
+        vp = self._scroll.viewport()
+        pt = vp.mapFromGlobal(QCursor.pos())
+        if not (0 <= pt.x() <= vp.width()) or not (-20 <= pt.y() <= vp.height() + 20):
+            return
+        bar = self._scroll.verticalScrollBar()
+        step = 0
+        if pt.y() < 24:
+            step = -8
+        elif pt.y() > vp.height() - 24:
+            step = 8
+        if step and bar.minimum() <= bar.value() + step <= bar.maximum():
+            bar.setValue(bar.value() + step)
+            self._drag_move(QCursor.pos())
 
     def _drag_end(self, gpos=None, cancel=False):
         d = self._drag
         if d is None:
             return
         self._drag = None
+        if hasattr(self, "_scroll_timer"):
+            self._scroll_timer.stop()
         QApplication.instance().removeEventFilter(self)
         while QApplication.overrideCursor() is not None:
             QApplication.restoreOverrideCursor()
