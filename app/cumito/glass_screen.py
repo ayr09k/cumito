@@ -24,6 +24,7 @@ se conoce todavía la dirección del servidor.
 """
 from __future__ import annotations
 
+import math
 import time
 import uuid
 
@@ -40,9 +41,13 @@ from PySide6.QtWidgets import (
 from . import icons, theme
 from .anim_widgets import HopLoader, Spinner, stagger_fade_in
 from .art_cache import ArtCache
+from .activity import ActivityFeed, Ticker
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
+PAN_MAX_W = int(W * 1.4)   # el fondo es un poco más ancho que la ventana y se pasea
+PAN_EDGE_S = 30.0          # segundos de una esquina a la otra
+PAN_TICK_MS = 80
 PANEL_TOP = 50       # donde arrancan las hojas de buscador/ajustes (debajo de cerrar/minimizar)
 CARD_W, CARD_H = 124, 158   # las cards de la vista previa de playlist
 TICK_MS = 250  # a cuánto se refresca el progreso / ecualizador -- bajo a propósito
@@ -882,8 +887,14 @@ class GlassScreen(QWidget):
         self._seen_unready = set()       # canciones de la cola que vimos sin preparar
         self._flash_until = {}           # uid -> hasta cuándo va el borde verde
         self._sheet_sig = None           # para no rehacer la lista si no cambió
+        self._last_act = None            # (id, texto) de la última actividad vista
+        self._activity_loaded = False
+        self._pan_range = 0              # cuánto se puede pasear el fondo (px)
+        self._pan_t0 = time.monotonic()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
+        self._pan_timer = QTimer(self)
+        self._pan_timer.timeout.connect(self._on_pan)
 
         self.setWindowTitle(title)
         # WindowMinimizeButtonHint: aunque la ventana no tiene marco, así
@@ -914,8 +925,13 @@ class GlassScreen(QWidget):
         self._filters_ready = True
 
         self._timer.start(TICK_MS)
+        self._pan_timer.start(PAN_TICK_MS)
 
     # ---------- lo que CumitoWindow (main.py) sobreescribe ----------
+    def request_activity(self):
+        """main.py lo sobreescribe: pide al servidor el registro completo."""
+        pass
+
     def settings_rows(self):
         return []
 
@@ -988,9 +1004,18 @@ class GlassScreen(QWidget):
         name = QLabel(self.windowTitle())
         name.setStyleSheet(f"color:#fff; font-size:13px; font-weight:700; background:transparent;")
         left.addWidget(dot)
-        left.addWidget(name)
-        row.addLayout(left)
-        row.addStretch()
+        # "Cumito" y, encima, el aviso de la última actividad (ocupan el mismo lugar)
+        title_area = QWidget()
+        title_area.setStyleSheet("background:transparent;")
+        title_area.setFixedHeight(22)
+        title_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        tgrid = QGridLayout(title_area)
+        tgrid.setContentsMargins(0, 0, 4, 0)
+        tgrid.addWidget(name, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        self.ticker = Ticker(name)
+        tgrid.addWidget(self.ticker, 0, 0)
+        left.addWidget(title_area, 1)
+        row.addLayout(left, 1)
 
         self.btn_stop_bot = _IconButton("power", danger=True)
         self.btn_stop_bot.setToolTip("Detener bot (sale del canal de voz)")
@@ -1401,6 +1426,38 @@ class GlassScreen(QWidget):
         stlay.addLayout(self.settings_list_layout)
         stlay.addStretch()
 
+        # ---- actividad: otra hoja, estilo chat ----
+        self.activity_view = _GlassPanel(self, top_radius=22, tint_alpha=170)
+        self.activity_view.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        self.activity_view.hide()
+        alay = QVBoxLayout(self.activity_view)
+        alay.setContentsMargins(14, 8, 8, 0)
+        alay.setSpacing(6)
+        alay.addLayout(self._handle_row())
+        ahead = QHBoxLayout()
+        ahead.setSpacing(10)
+        self.btn_activity_back = _IconButton("back", size=30)
+        self.btn_activity_back.clicked.connect(self._close_activity)
+        self._chrome_widgets.append(self.btn_activity_back)
+        ahead.addWidget(self.btn_activity_back)
+        atitles = QVBoxLayout()
+        atitles.setSpacing(0)
+        a_title = QLabel("Actividad")
+        a_title.setStyleSheet("color:#fff; font-size:17px; font-weight:800; background:transparent;")
+        a_sub = QLabel("Quién puso qué en Cumito")
+        a_sub.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10.5px; background:transparent;")
+        atitles.addWidget(a_title)
+        atitles.addWidget(a_sub)
+        ahead.addLayout(atitles)
+        ahead.addStretch()
+        self.activity_spinner = Spinner(18)
+        ahead.addWidget(self.activity_spinner)
+        ahead.addSpacing(8)
+        alay.addLayout(ahead)
+        self.activity_feed = ActivityFeed(self.art_cache)
+        self.activity_scroll = _bare_scroll(self.activity_feed)
+        alay.addWidget(self.activity_scroll, 1)
+
         # ---- mini-reproductor (durante el buscador) ----
         self.mini_player = _GlassPanel(self, tint_alpha=175)
         self.mini_player.setGeometry(0, H - 58, W, 58)
@@ -1427,7 +1484,8 @@ class GlassScreen(QWidget):
             "QPushButton { background: rgba(255,255,255,0.92); color:#111; border:none; border-radius: 16px; font-size: 12px; }"
         )
 
-        self._chrome_widgets += [self.playlist_sheet, self.search_view, self.settings_view, self.mini_player]
+        self._chrome_widgets += [self.playlist_sheet, self.search_view, self.settings_view, self.activity_view,
+                                 self.mini_player]
 
         # ---- aviso de actualización (baja desde arriba como notificación) ----
         self._build_update_banner()
@@ -1553,7 +1611,7 @@ class GlassScreen(QWidget):
         return row
 
     def _repaint_panels(self):
-        for w in (self.playlist_sheet, self.search_view, self.settings_view, self.mini_player):
+        for w in (self.playlist_sheet, self.search_view, self.settings_view, self.activity_view, self.mini_player):
             w.update()
 
     # ================= switch de glass =================
@@ -1575,9 +1633,19 @@ class GlassScreen(QWidget):
         self._refresh_recent()
         self._refresh_mosaic_thumbs(url, pixmap)
         self._refresh_preview_cards(url, pixmap)
+        self.activity_feed.on_art_loaded(url, pixmap)
 
     def _set_art_background(self, pixmap):
-        self.art_bg.setPixmap(_cover_pixmap(pixmap, W, H))
+        # un poco más ancha que la ventana, para que se pasee de lado a lado
+        if pixmap is not None and not pixmap.isNull():
+            natural = int(pixmap.width() * H / max(1, pixmap.height()))
+            pw = max(W, min(PAN_MAX_W, natural))
+        else:
+            pw = W
+        self.art_bg.setPixmap(_cover_pixmap(pixmap, pw, H))
+        self.art_bg.resize(pw, H)
+        self._pan_range = pw - W
+        self._on_pan()
         # el vidrio de los paneles usa esta misma portada, desenfocada
         self._blur_pix = _blur_pixmap(pixmap, W, H)
         if hasattr(self, "mini_player"):
@@ -1602,6 +1670,55 @@ class GlassScreen(QWidget):
         self._refresh_recent()
         self._update_req_tiles()
         self._update_mode()
+        self._on_activity(state.get("activity_last"))
+
+    # ---- actividad ----
+    def _on_activity(self, a):
+        if not isinstance(a, dict) or a.get("id") is None:
+            return
+        key = (a.get("id"), a.get("text"))
+        if key == self._last_act:
+            return
+        first = self._last_act is None
+        new_id = first or a.get("id") != self._last_act[0]
+        self._last_act = key
+        if self._activity_loaded:
+            self.activity_feed.add_or_update(a)
+            if self._panel_mode == "activity":
+                QTimer.singleShot(30, self._activity_to_bottom)
+        # al conectarse llega la última que hubo: solo se anuncia si es reciente
+        if new_id and (not first or time.time() - float(a.get("ts") or 0) < 15):
+            self.ticker.show_activity(a)
+
+    def open_activity(self):
+        if self._panel_mode == "search":
+            self.search_view.hide()
+            self.mini_player.hide()
+        if self._panel_mode == "settings":
+            self.settings_view.hide()
+        self._close_sheet()
+        self._panel_mode = "activity"
+        self._searching = True
+        self.search_pill.setVisible(False)
+        self.activity_spinner.setVisible(not self._activity_loaded)
+        self._panel_in(self.activity_view)
+        self.text_overlay.raise_()
+        self.request_activity()
+        QTimer.singleShot(420, self._activity_to_bottom)
+
+    def set_activity_list(self, entries):
+        self._activity_loaded = True
+        self.activity_spinner.hide()
+        self.activity_feed.set_entries(entries or [])
+        QTimer.singleShot(40, self._activity_to_bottom)
+
+    def _activity_to_bottom(self):
+        bar = self.activity_scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _close_activity(self):
+        self._panel_out(self.activity_view)
+        self._after_panel_closed()
 
     # ---- vista vacía vs. "ahora sonando" ----
     def _update_mode(self, animate=True):
@@ -1922,6 +2039,8 @@ class GlassScreen(QWidget):
     def _open_search(self):
         if self._panel_mode == "settings":
             self.settings_view.hide()
+        if self._panel_mode == "activity":
+            self.activity_view.hide()
         self._close_sheet()
         self._panel_mode = "search"
         self._searching = True
@@ -2205,6 +2324,8 @@ class GlassScreen(QWidget):
         if self._panel_mode == "search":
             self.search_view.hide()
             self.mini_player.hide()
+        if self._panel_mode == "activity":
+            self.activity_view.hide()
         self._close_sheet()
         self._panel_mode = "settings"
         self._searching = True
@@ -2240,6 +2361,9 @@ class GlassScreen(QWidget):
             if self._panel_mode == "settings":
                 self._close_settings()
                 return
+            if self._panel_mode == "activity":
+                self._close_activity()
+                return
         super().keyPressEvent(ev)
 
     # ================= ventana: arrastrar =================
@@ -2257,20 +2381,40 @@ class GlassScreen(QWidget):
     # ================= pausar la animación si la ventana no se ve =================
     def hideEvent(self, ev):
         self._timer.stop()
+        self._pan_timer.stop()
         super().hideEvent(ev)
 
     def showEvent(self, ev):
         if not self._timer.isActive():
             self._timer.start(TICK_MS)
+        if not self._pan_timer.isActive():
+            self._pan_timer.start(PAN_TICK_MS)
         super().showEvent(ev)
 
     def changeEvent(self, ev):
         if ev.type() == QEvent.WindowStateChange:
             if self.isMinimized():
                 self._timer.stop()
-            elif not self._timer.isActive():
-                self._timer.start(TICK_MS)
+                self._pan_timer.stop()
+            else:
+                if not self._timer.isActive():
+                    self._timer.start(TICK_MS)
+                if not self._pan_timer.isActive():
+                    self._pan_timer.start(PAN_TICK_MS)
         super().changeEvent(ev)
+
+    # ================= el fondo se pasea lento de lado a lado =================
+    def _on_pan(self):
+        if self._pan_range <= 0:
+            if self.art_bg.x() != 0:
+                self.art_bg.move(0, 0)
+            return
+        # ida y vuelta: PAN_EDGE_S segundos de una esquina a la otra, suave
+        # al llegar a cada esquina (como un coseno)
+        t = (time.monotonic() - self._pan_t0) / PAN_EDGE_S
+        x = -round(self._pan_range * (0.5 - 0.5 * math.cos(math.pi * t)))
+        if x != self.art_bg.x():
+            self.art_bg.move(x, 0)
 
     # ================= animación / reloj =================
     def _on_tick(self):

@@ -16,6 +16,7 @@ vuelva a preguntar.
 """
 import asyncio
 import logging
+import signal
 import sys
 
 from cumito_bot import config, protocol
@@ -78,14 +79,16 @@ class CumitoServer:
         asyncio.create_task(self.relay.broadcast_state(
             snap["host_label"], snap["now_playing"], snap["queue"],
             volume=snap.get("volume"), recent=snap.get("recent"),
+            activity_last=snap.get("activity_last"),
         ))
 
     async def _on_relay_command(self, data, sender_name, ws=None):
         bot = self.bot
+        who = sender_name
         action = data.get("action")
         if action == "play":
             await bot.action_play(data.get("query", ""), as_playlist=bool(data.get("as_playlist")),
-                                  req=data.get("req"))
+                                  req=data.get("req"), who=who)
         elif action == "playlist_preview":
             # responde solo a quien preguntó, como la búsqueda
             preview = await bot.action_playlist_preview(data.get("url", ""))
@@ -95,23 +98,30 @@ class CumitoServer:
                 except Exception:
                     pass
         elif action == "pause":
-            await bot.action_pause()
+            await bot.action_pause(who=who)
         elif action == "resume":
-            await bot.action_resume()
+            await bot.action_resume(who=who)
         elif action == "skip":
-            await bot.action_skip()
+            await bot.action_skip(who=who)
         elif action == "stop":
-            await bot.action_stop()
+            await bot.action_stop(who=who)
         elif action == "stop_and_leave":
-            await bot.action_stop_and_leave()
+            await bot.action_stop_and_leave(who=who)
         elif action == "queue_remove":
-            await bot.action_queue_remove(int(data.get("index", -1)))
+            await bot.action_queue_remove(int(data.get("index", -1)), who=who)
         elif action == "queue_clear":
-            await bot.action_queue_clear()
+            await bot.action_queue_clear(who=who)
         elif action == "set_volume":
-            await bot.action_set_volume(data.get("value", 0.6))
+            await bot.action_set_volume(data.get("value", 0.6), who=who)
         elif action == "play_index":
-            await bot.action_play_index(int(data.get("index", -1)), uid=data.get("uid"))
+            await bot.action_play_index(int(data.get("index", -1)), uid=data.get("uid"), who=who)
+        elif action == "activity_list":
+            # el historial completo, solo para quien lo pidió (Ajustes > Actividad)
+            if ws is not None:
+                try:
+                    await ws.send(protocol.dumps("activity_list", entries=bot.activity_list()))
+                except Exception:
+                    pass
         elif action == "prepare":
             await bot.action_prepare(int(data.get("index", -1)), uid=data.get("uid"))
         elif action == "search":
@@ -139,7 +149,17 @@ async def main():
     if not config.is_complete(cfg):
         cfg = _first_time_setup()
     server = CumitoServer(cfg)
-    await server.run()
+    # systemd apaga con SIGTERM (al actualizar o reiniciar): se atrapa para
+    # cerrar ordenado y dejar anotado en qué segundo iba la canción.
+    task = asyncio.current_task()
+    try:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    except (NotImplementedError, RuntimeError):
+        pass
+    try:
+        await server.run()
+    except asyncio.CancelledError:
+        print("Cumito servidor detenido (se guardó dónde iba).")
 
 
 if __name__ == "__main__":

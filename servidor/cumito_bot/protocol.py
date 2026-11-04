@@ -18,6 +18,9 @@ App -> Servidor:
             "entries": [{"title", "duration", "uploader", "art_url"}, ...]}
     {"type": "command", "action": "play_index", "index": 3, "uid": 42}   # poner ya esa
     {"type": "command", "action": "prepare", "index": 3, "uid": 42}      # dejarla lista
+    {"type": "command", "action": "activity_list"}
+        -> responde solo a quien preguntó:
+           {"type": "activity_list", "entries": [<actividad>, ...]}   # lo más viejo primero
 
 Servidor -> apps (se manda a todas cada vez que algo cambia):
     {
@@ -31,6 +34,8 @@ Servidor -> apps (se manda a todas cada vez que algo cambia):
                  "ready": true, "loading": false, "art_url": "..." | None}, ...],
       "members": ["Juan", "Pedro"],
       "volume": 0.6,
+      "activity_last": {"id": 12, "ts": 1730000000.0, "who": "Juan", "kind": "add",
+                        "text": "agregó 1 canción", "title": "...", "sub": "artista", "art": "url"} | None,
       "recent": [  # lo último que sonó, lo más nuevo primero (máx. 8)
           {"title": "...", "webpage_url": "...", "duration": 200,
            "art_url": "...", "uploader": "..."}, ...

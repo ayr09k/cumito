@@ -62,7 +62,8 @@ class RelayServer:
         finally:
             self._clients.pop(ws, None)
 
-    async def broadcast_state(self, host_label, now_playing, queue, members=None, volume=None, recent=None):
+    async def broadcast_state(self, host_label, now_playing, queue, members=None, volume=None, recent=None,
+                              **extra):
         members = members if members is not None else list(self._clients.values())
         self._last_state = {
             "type": "state",
@@ -72,6 +73,7 @@ class RelayServer:
             "members": members,
             "volume": volume,
             "recent": recent or [],
+            **extra,
         }
         raw = json.dumps(self._last_state)
         dead = []

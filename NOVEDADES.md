@@ -1,5 +1,6 @@
-## Cumito 1.1
+## Cumito 1.2
 
-- Actualizaciones automáticas: cuando salga una versión nueva, Cumito te avisa arriba y se actualiza con un toque.
-- Al tocar un video en la búsqueda: "Añadiendo…" en morado y luego "Añadido · #N en la lista" en verde.
-- Playlists con vista previa de cartas, canciones que se preparan solas y "Buscar más".
+- Si el servidor se reinicia (por una actualización o un corte), Cumito vuelve solo al canal y sigue la canción en el segundo en que iba, con la lista completa.
+- Nuevo en Ajustes: **Ver actividad**. Quién puso, saltó, pausó o quitó cada canción, estilo chat.
+- Arriba, donde dice "Cumito", aparece por 4 segundos lo último que pasó.
+- La portada de fondo se mueve muy lento de lado a lado.

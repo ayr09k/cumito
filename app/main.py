@@ -35,10 +35,12 @@ class CumitoWindow(GlassScreen):
 
     # ---------- ajustes ----------
     def settings_rows(self):
-        return ["Cambiar servidor", "Cambiar mi nombre"]
+        return ["Ver actividad", "Cambiar servidor", "Cambiar mi nombre"]
 
     def on_settings_row(self, label):
-        if label == "Cambiar servidor":
+        if label == "Ver actividad":
+            self.open_activity()
+        elif label == "Cambiar servidor":
             self.ask_text(
                 "Dirección del servidor (déjalo vacío para volver al de siempre)", "set_address",
                 placeholder=config.DEFAULT_SERVER, initial=self.cfg.get("host_address", ""),
@@ -62,6 +64,10 @@ class CumitoWindow(GlassScreen):
     def on_recent_searches_changed(self, searches):
         self.cfg["recent_searches"] = searches
         config.save(self.cfg)
+
+    def request_activity(self):
+        if self.runtime:
+            self.runtime.send("activity_list")
 
     def do_search(self, query, limit=8, offset=0):
         if self.runtime:
@@ -98,6 +104,8 @@ class CumitoWindow(GlassScreen):
                                         offset=int(payload.get("offset") or 0))
             elif kind == "playlist_preview":
                 self.show_playlist_preview(payload)
+            elif kind == "activity_list":
+                self.set_activity_list(payload.get("entries") or [])
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb):

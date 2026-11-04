@@ -22,7 +22,7 @@ REQ_ANTES="$(md5sum "$CARPETA/requirements.txt" 2>/dev/null | cut -d' ' -f1 || t
 CAMBIOS="$(como python3 - "$REPO_DIR/servidor" "$CARPETA" <<'PY'
 import filecmp, os, shutil, sys
 src, dst = sys.argv[1], sys.argv[2]
-NUNCA = {"config.json", "cookies.txt", "history.json", "ffmpeg.log", ".ytdlp_dia"}
+NUNCA = {"config.json", "cookies.txt", "history.json", "session.json", "activity.json", "ffmpeg.log", ".ytdlp_dia"}
 for root, dirs, files in os.walk(src):
     dirs[:] = [d for d in dirs if d not in (".venv", "__pycache__")]
     rel = os.path.relpath(root, src)

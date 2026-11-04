@@ -11,3 +11,6 @@ config.json
 cookies.txt
 history.json
 ffmpeg.log
+session.json
+activity.json
+*.tmp
