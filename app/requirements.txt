@@ -1,0 +1,3 @@
+PySide6>=6.6
+websockets>=12
+requests

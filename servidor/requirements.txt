@@ -1,0 +1,8 @@
+discord.py[voice]>=2.7.1
+# davey 0.2 deja al bot "mudo" con discord.py 2.7.1 (sale en verde pero no
+# se escucha nada). Hasta que discord.py se actualice, se queda en 0.1.x.
+davey>=0.1.7,<0.2
+yt-dlp[default,deno]
+websockets>=12
+imageio-ffmpeg
+certifi

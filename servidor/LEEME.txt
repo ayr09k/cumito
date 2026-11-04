@@ -1,0 +1,37 @@
+CUMITO - SERVIDOR (esto va en la VM de Oracle, no en tu PC)
+=============================================================
+
+Es el bot de Discord + el puente al que se conecta la app Cumito. No
+tiene ventana: corre solo, 24/7, en la nube.
+
+Instalar (una sola vez):   bash instalar.sh
+
+Comandos útiles, ya dentro de la VM:
+  Ver qué está haciendo:     sudo journalctl -u cumito -f
+  Reiniciarlo:               sudo systemctl restart cumito
+  Actualizar yt-dlp:         bash actualizar.sh
+  Cambiar token/servidor:    rm config.json  y  bash instalar.sh
+
+
+Si YouTube bloquea canciones ("Sign in to confirm you're not a bot")
+---------------------------------------------------------------------------
+YouTube desconfía de los servidores en la nube. El bot ya se defiende
+solo: si YouTube no deja sacar una canción, la busca en SoundCloud.
+
+Para que YouTube vuelva a funcionar, se le pueden dar al bot las cookies
+de una cuenta de Google DE REPUESTO (NUNCA tu cuenta principal: YouTube
+podría bloquearla). Se guardan como cookies.txt en esta carpeta, y el
+bot las usa solo si el archivo existe.
+
+Lo último que sonó se guarda en history.json (al lado de este archivo).
+
+
+Actualizaciones automáticas
+------------------------------
+Una sola vez, dentro de la VM:
+  curl -fsSL https://raw.githubusercontent.com/ayr09k/cumito/main/servidor/activar_actualizaciones.sh | bash
+
+Desde ahí la VM revisa GitHub cada 10 minutos y, si hay cambios, se
+actualiza y reinicia sola (config.json, cookies.txt y history.json nunca
+se tocan). Una vez al día también pone al día yt-dlp.
+Ver qué hizo:  sudo journalctl -u cumito-actualizar -n 20

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+_construccion/
+build/
+dist/
+*.spec
+*.exe
+.venv/
+# secretos y datos del servidor: NUNCA al repo
+config.json
+cookies.txt
+history.json
+ffmpeg.log
