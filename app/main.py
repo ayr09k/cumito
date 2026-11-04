@@ -30,6 +30,7 @@ class CumitoWindow(GlassScreen):
         self.runtime = None
         super().__init__("Cumito")
         self.recent_searches = list(self.cfg.get("recent_searches") or [])[:6]
+        self.set_visual(self.cfg.get("visual") or {})
         self.text_overlay.submitted.connect(self._on_text_submitted)
         self.btn_close.clicked.connect(QApplication.instance().quit)
 
@@ -59,6 +60,10 @@ class CumitoWindow(GlassScreen):
             self.cfg["display_name"] = text
             config.save(self.cfg)
             self._connect()
+
+    def on_visual_changed(self, visual):
+        self.cfg["visual"] = visual
+        config.save(self.cfg)
 
     # ---------- búsqueda ----------
     def on_recent_searches_changed(self, searches):

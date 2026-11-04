@@ -44,6 +44,7 @@ from .art_cache import ArtCache
 from .activity import ActivityFeed, Ticker
 from .hold import HoldButton, HoldConfirm
 from .wheel import OptionWheel
+from .mini import CHROMAS, SHAPE_NAMES, MiniWindow
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -1018,6 +1019,10 @@ class GlassScreen(QWidget):
         self._last_poke = time.monotonic()
         self._last_cursor = None
         self._last_option = "activity"   # la rueda de opciones abre donde quedó
+        # opciones visuales (main.py las guarda): modo streamer, forma del mini, fondo para OBS
+        self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": ""}
+        self.mini = None                 # la ventanita del modo mini (si se abrió)
+        self._now_art = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._pan_timer = QTimer(self)
@@ -1055,6 +1060,17 @@ class GlassScreen(QWidget):
         self._pan_timer.start(PAN_TICK_MS)
 
     # ---------- lo que CumitoWindow (main.py) sobreescribe ----------
+    def on_visual_changed(self, visual):
+        """main.py lo sobreescribe para guardar las opciones visuales."""
+        pass
+
+    def set_visual(self, visual):
+        self.visual.update({k: v for k, v in (visual or {}).items() if k in self.visual})
+        self._set_pills_visible(not self._empty_mode and not self._panel_mode)
+        if self.mini is not None:
+            self.mini.set_shape(self.visual["mini_shape"])
+            self.mini.set_chroma(self.visual["chroma"])
+
     def request_activity(self):
         """main.py lo sobreescribe: pide al servidor el registro completo."""
         pass
@@ -1164,12 +1180,18 @@ class GlassScreen(QWidget):
 
         self.search_pill = _Pill("  Buscar", icon_name="search")
         self.search_pill.clicked.connect(self._open_search)
+        # modo streamer: al lado de Buscar, el botón para pasar al mini
+        self.mini_pill = _Pill("  Mini", icon_name="mini")
+        self.mini_pill.clicked.connect(self.enter_mini)
+        self.mini_pill.hide()
         pill_row = QHBoxLayout()
+        pill_row.setSpacing(8)
         pill_row.addWidget(self.search_pill)
+        pill_row.addWidget(self.mini_pill)
         pill_row.addStretch()
         tlay.addLayout(pill_row)
 
-        self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill]
+        self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill, self.mini_pill]
 
         # ---- overlay inferior: ahora sonando ----
         self.now_overlay = QWidget(self)
@@ -1803,6 +1825,9 @@ class GlassScreen(QWidget):
         self.activity_feed.on_art_loaded(url, pixmap)
 
     def _set_art_background(self, pixmap):
+        self._now_art = pixmap
+        if self.mini is not None:
+            self.mini.set_art(pixmap)
         # un poco más ancha que la ventana, para que se pasee de lado a lado
         if pixmap is not None and not pixmap.isNull():
             natural = int(pixmap.width() * H / max(1, pixmap.height()))
@@ -1838,6 +1863,7 @@ class GlassScreen(QWidget):
         self._update_req_tiles()
         self._update_mode()
         self._on_activity(state.get("activity_last"))
+        self._sync_mini()
 
     # ---- actividad ----
     def _on_activity(self, a):
@@ -1887,7 +1913,7 @@ class GlassScreen(QWidget):
         self._close_sheet()
         self._panel_mode = "activity"
         self._searching = True
-        self.search_pill.setVisible(False)
+        self._set_pills_visible(False)
         self.activity_spinner.setVisible(not self._activity_loaded)
         self._panel_in(self.activity_view)
         self.text_overlay.raise_()
@@ -1927,7 +1953,7 @@ class GlassScreen(QWidget):
         self._empty_mode = empty
         if empty:
             self._close_sheet()
-        self.search_pill.setVisible(not empty)  # en vacío ya está la barra grande
+        self._set_pills_visible(not empty)  # en vacío ya está la barra grande
         if animate:
             self._fade(self.empty_view, show=empty)
             self._fade(self.now_overlay, show=not empty)
@@ -2224,7 +2250,7 @@ class GlassScreen(QWidget):
     def _after_panel_closed(self):
         self._searching = False
         self._panel_mode = None
-        self.search_pill.setVisible(not self._empty_mode)
+        self._set_pills_visible(not self._empty_mode)
 
     # ---- buscador ----
     def _open_search(self):
@@ -2235,7 +2261,7 @@ class GlassScreen(QWidget):
         self._close_sheet()
         self._panel_mode = "search"
         self._searching = True
-        self.search_pill.setVisible(False)
+        self._set_pills_visible(False)
         if not self.search_input.text().strip():
             self._refresh_search_home()
             self._show_search_state("home")
@@ -2521,8 +2547,38 @@ class GlassScreen(QWidget):
         for row in self.settings_rows():
             label, icon = (row, "settings") if isinstance(row, str) else row
             items.append({"key": "row:" + label, "label": label, "icon": icon})
+        v = self.visual
+        items.append({"key": "streamer", "label": "Modo streamer", "icon": "streamer",
+                      "hint": "Encendido" if v["streamer"] else "Apagado"})
+        items.append({"key": "shape", "label": "Forma del mini", "icon": "shape_" + {
+            "cuadrado": "square", "vertical": "tall", "ancho": "wide", "circulo": "circle"}[v["mini_shape"]],
+            "hint": SHAPE_NAMES[v["mini_shape"]]})
+        items.append({"key": "chroma", "label": "Fondo para OBS", "icon": "palette",
+                      "hint": CHROMAS.get(v["chroma"], "Sin fondo")})
         items.append({"key": "power", "label": "Apagar Cumito", "icon": "power", "danger": True})
         return items
+
+    def _shape_items(self):
+        icon = {"cuadrado": "shape_square", "vertical": "shape_tall", "ancho": "shape_wide", "circulo": "shape_circle"}
+        items = [{"key": "back", "label": "Volver", "icon": "back_list"}]
+        for k, name in SHAPE_NAMES.items():
+            items.append({"key": "shape:" + k, "label": name, "icon": icon[k],
+                          "hint": "Elegida" if self.visual["mini_shape"] == k else None})
+        return items
+
+    def _chroma_items(self):
+        items = [{"key": "back", "label": "Volver", "icon": "back_list"}]
+        for k, name in CHROMAS.items():
+            items.append({"key": "chroma:" + k, "label": name, "icon": "palette",
+                          "hint": "Elegido" if self.visual["chroma"] == k else None})
+        return items
+
+    def _visual_changed(self):
+        self.on_visual_changed(dict(self.visual))
+        self._set_pills_visible(not self._empty_mode and not self._panel_mode)
+        if self.mini is not None:
+            self.mini.set_shape(self.visual["mini_shape"])
+            self.mini.set_chroma(self.visual["chroma"])
 
     def _open_settings(self):
         if self._panel_mode == "search":
@@ -2533,15 +2589,36 @@ class GlassScreen(QWidget):
         self._close_sheet()
         self._panel_mode = "settings"
         self._searching = True
-        self.search_pill.setVisible(False)
+        self._set_pills_visible(False)
         self.option_wheel.set_items(self._option_items(), keep_key=self._last_option)
         self._panel_in(self.settings_view)
         self.text_overlay.raise_()
         self.option_wheel.setFocus()
 
     def _on_option(self, key):
+        if key == "back":
+            self.option_wheel.set_items(self._option_items(), keep_key=self._last_option)
+            return
+        if key.startswith("shape:"):
+            self.visual["mini_shape"] = key[6:]
+            self._visual_changed()
+            self.option_wheel.set_items(self._option_items(), keep_key="shape")
+            return
+        if key.startswith("chroma:"):
+            self.visual["chroma"] = key[7:]
+            self._visual_changed()
+            self.option_wheel.set_items(self._option_items(), keep_key="chroma")
+            return
         self._last_option = key
-        if key == "glass":
+        if key == "streamer":
+            self.visual["streamer"] = not self.visual["streamer"]
+            self._visual_changed()
+            self.option_wheel.set_items(self._option_items(), keep_key="streamer")
+        elif key == "shape":
+            self.option_wheel.set_items(self._shape_items(), keep_key="shape:" + self.visual["mini_shape"])
+        elif key == "chroma":
+            self.option_wheel.set_items(self._chroma_items(), keep_key="chroma:" + self.visual["chroma"])
+        elif key == "glass":
             self._apply_glass(not self._glass_on)
             self.option_wheel.set_items(self._option_items(), keep_key="glass")
         elif key == "activity":
@@ -2639,6 +2716,63 @@ class GlassScreen(QWidget):
         elif not self._idle and time.monotonic() - self._last_poke > IDLE_S:
             self._set_idle(True)
 
+    def _check_streamer_idle(self):
+        """En modo streamer, 8 s sin tocar nada = vuelve solo al mini."""
+        pos = QCursor.pos()
+        if pos != self._last_cursor:
+            self._last_cursor = pos
+            if self.frameGeometry().contains(pos):
+                self._last_poke = time.monotonic()
+        busy = (self._panel_mode or self._sheet_open or self.hold_confirm.isVisible()
+                or self.text_overlay.isVisible())
+        if busy:
+            self._last_poke = time.monotonic()
+        elif time.monotonic() - self._last_poke > IDLE_S:
+            self.enter_mini()
+
+    # ================= modo mini (streamer) =================
+    def _set_pills_visible(self, visible):
+        self.search_pill.setVisible(bool(visible))
+        self.mini_pill.setVisible(bool(visible) and self.visual.get("streamer", False))
+
+    def _sync_mini(self):
+        m = self.mini
+        if m is None:
+            return
+        np = self.state.get("now_playing")
+        if np and self.state.get("connected", True):
+            m.set_track(np.get("title"), np.get("uploader"))
+            m.set_progress(self._local_elapsed, np.get("duration") or 0, np.get("paused"))
+        else:
+            m.set_track("Nada sonando", "Cumito")
+            m.set_progress(0, 0, True)
+
+    def enter_mini(self):
+        if self.mini is None:
+            self.mini = MiniWindow(self.visual["mini_shape"], self.visual["chroma"])
+            self.mini.setWindowIcon(self.windowIcon())
+            self.mini.expand.connect(self.exit_mini)
+            self.mini.play_pause.connect(self._on_play_pause)
+            self.mini.next_.connect(lambda: self.send_command("skip"))
+            self.mini.move(self.pos())
+        self.mini.set_shape(self.visual["mini_shape"])
+        self.mini.set_chroma(self.visual["chroma"])
+        if self._now_art is not None:
+            self.mini.set_art(self._now_art)
+        self._sync_mini()
+        self.mini.show()
+        self.mini.raise_()
+        self.hide()
+
+    def exit_mini(self):
+        self._last_poke = time.monotonic()
+        self._last_cursor = QCursor.pos()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if self.mini is not None:
+            self.mini.hide()
+
     def _idle_opacity(self, widget, show, ms, keep_effect=False):
         fx = self._idle_fx.get(widget)
         if fx is not None and widget.graphicsEffect() is not fx:
@@ -2699,6 +2833,8 @@ class GlassScreen(QWidget):
 
     # ================= el fondo se pasea lento de lado a lado =================
     def _on_pan(self):
+        if self.visual.get("streamer"):
+            return  # modo streamer: más liviano, el fondo queda quieto
         if self._pan_range <= 0:
             if self.art_bg.x() != 0:
                 self.art_bg.move(0, 0)
@@ -2712,7 +2848,12 @@ class GlassScreen(QWidget):
 
     # ================= animación / reloj =================
     def _on_tick(self):
-        self._check_idle()
+        if self.visual.get("streamer"):
+            if self._idle:
+                self._set_idle(False)
+            self._check_streamer_idle()
+        else:
+            self._check_idle()
         np = self.state.get("now_playing")
         if np and not np.get("paused") and self.state.get("connected", True):
             self._local_elapsed += TICK_MS / 1000

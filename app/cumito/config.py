@@ -13,6 +13,7 @@ DEFAULTS = {
     "host_address": "",   # vacío = usar DEFAULT_SERVER
     "display_name": "",
     "recent_searches": [],
+    "visual": {},          # modo streamer, forma del mini, fondo para OBS
 }
 
 

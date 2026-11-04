@@ -214,4 +214,32 @@ w.set_activity_list([
 ])
 wait(900)
 shot(w, "13_actividad")
+# modo streamer: opciones y las 4 formas del mini
+w._close_activity()
+wait(400)
+w.visual["streamer"] = True
+w._set_pills_visible(True)
+shot(w, "14_streamer_boton_mini")
+w._open_settings()
+w.option_wheel.set_items(w._option_items(), keep_key="streamer")
+wait(300)
+shot(w, "15_opciones_streamer")
+w.option_wheel.set_items(w._shape_items(), keep_key="shape:circulo")
+wait(300)
+shot(w, "16_opciones_formas")
+w._close_settings()
+wait(400)
+for shape in ("cuadrado", "vertical", "ancho", "circulo"):
+    w.visual["mini_shape"] = shape
+    w.visual["chroma"] = "#00B140" if shape == "circulo" else ""
+    w.enter_mini()
+    wait(500)
+    m = w.mini
+    m._marquee_x = 60
+    m.update()
+    app.processEvents()
+    m.grab().save(str(OUT / f"17_mini_{shape}.png"))
+    print("foto mini", shape)
+    w.exit_mini()
+    wait(200)
 print("listo")
