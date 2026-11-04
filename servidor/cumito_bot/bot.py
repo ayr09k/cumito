@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import os
 import shlex
@@ -238,9 +239,42 @@ def _flat_search(prefix: str, query: str, limit: int) -> list[dict]:
         return out
 
 
+_ytmusic = None
+
+
 def _music_search(query: str, limit: int) -> list[dict]:
     """Buscar como YouTube Music, en su sección "Canciones": ahí salen las
-    versiones de audio oficiales (no el videoclip, ni covers, ni en vivo)."""
+    versiones de audio oficiales (no el videoclip, ni covers, ni en vivo).
+    Usa ytmusicapi (trae artista, duración y portada cuadrada); si no está o
+    falla, usa yt-dlp, que solo trae el nombre."""
+    global _ytmusic
+    try:
+        if _ytmusic is None:
+            from ytmusicapi import YTMusic
+            _ytmusic = YTMusic()
+        rows = _ytmusic.search(query, filter="songs", limit=max(1, min(limit, 60)))
+        out = []
+        for r in rows:
+            vid = r.get("videoId")
+            if not vid:
+                continue
+            thumbs = r.get("thumbnails") or []
+            art = thumbs[-1]["url"] if thumbs else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+            # las portadas de YouTube Music se pueden pedir más grandes
+            art = re.sub(r"=w\d+-h\d+", "=w400-h400", art)
+            out.append({
+                "title": r.get("title") or "Sin título",
+                "webpage_url": f"https://www.youtube.com/watch?v={vid}",
+                "duration": r.get("duration_seconds"),
+                "uploader": ", ".join(a.get("name") for a in (r.get("artists") or []) if a.get("name")) or None,
+                "art_url": art,
+            })
+            if len(out) >= limit:
+                break
+        if out:
+            return out
+    except Exception as e:
+        log.warning("ytmusicapi no pudo buscar (%s); uso yt-dlp", str(e)[:120])
     from urllib.parse import quote_plus
     url = f"https://music.youtube.com/search?q={quote_plus(query)}#songs"
     opts = dict(SEARCH_YTDL_OPTS, playlistend=max(1, min(limit, 40)))
@@ -250,17 +284,12 @@ def _music_search(query: str, limit: int) -> list[dict]:
     for e in (info or {}).get("entries") or []:
         if not e or not e.get("id"):
             continue
-        artists = e.get("artists") or []
-        artist = (artists[0] if artists and isinstance(artists[0], str) else None) \
-            or e.get("artist") or e.get("channel") or e.get("uploader")
-        if artist and artist.endswith(" - Topic"):
-            artist = artist[:-8]
         out.append({
-            "title": e.get("title") or e.get("track") or "Sin título",
+            "title": e.get("title") or "Sin título",
             "webpage_url": f"https://www.youtube.com/watch?v={e['id']}",
             "duration": e.get("duration"),
-            "uploader": artist,
-            "art_url": _best_thumb(e),
+            "uploader": None,
+            "art_url": f"https://i.ytimg.com/vi/{e['id']}/hqdefault.jpg",
         })
         if len(out) >= limit:
             break

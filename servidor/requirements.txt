@@ -4,5 +4,7 @@ discord.py[voice]>=2.7.1
 davey>=0.1.7,<0.2
 yt-dlp[default,deno]
 websockets>=12
+# búsqueda tipo YouTube Music (artista, duración y portada de cada canción)
+ytmusicapi>=1.8
 imageio-ffmpeg
 certifi
