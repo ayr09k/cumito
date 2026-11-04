@@ -30,7 +30,7 @@ SHAPES = {
     "vertical": (230, 470),
     "ancho": (470, 230),
     "circulo": (240, 240),
-    "disco": (250, 340),
+    "disco": (250, 314),
 }
 SHAPE_NAMES = {"cuadrado": "Cuadrado", "vertical": "Vertical", "ancho": "Ancho", "circulo": "Círculo",
                "disco": "Disco"}
