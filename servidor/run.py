@@ -127,10 +127,13 @@ class CumitoServer:
         elif action == "search":
             # Esta sí responde directo a quien preguntó, no se difunde.
             offset = int(data.get("offset", 0) or 0)
-            results = await bot.action_search(data.get("query", ""), limit=int(data.get("limit", 8)), offset=offset)
+            kind = "music" if data.get("kind") == "music" else "all"
+            results = await bot.action_search(data.get("query", ""), limit=int(data.get("limit", 8)),
+                                              offset=offset, kind=kind)
             if ws is not None:
                 try:
-                    await ws.send(protocol.search_results(data.get("query", ""), results, offset=offset))
+                    await ws.send(protocol.search_results(data.get("query", ""), results, offset=offset,
+                                                          kind=kind))
                 except Exception:
                     pass
 

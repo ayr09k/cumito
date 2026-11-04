@@ -10,7 +10,8 @@ App -> Servidor:
     {"type": "command", "action": "queue_remove", "index": 2}
     {"type": "command", "action": "queue_clear"}
     {"type": "command", "action": "set_volume", "value": 0.6}
-    {"type": "command", "action": "search", "query": "...", "limit": 8, "offset": 0}
+    {"type": "command", "action": "search", "query": "...", "limit": 8, "offset": 0,
+     "kind": "music" | "all"}   # music = como YouTube Music (versiones de audio)
     {"type": "command", "action": "play", "query": "<link>", "as_playlist": true}
     {"type": "command", "action": "playlist_preview", "url": "<link de playlist>"}
         -> responde solo a quien preguntó:
@@ -90,8 +91,8 @@ def state(host_label, now_playing, queue, members, volume=None):
     )
 
 
-def search_results(query, results, offset=0):
-    return dumps("search_results", query=query, results=results, offset=offset)
+def search_results(query, results, offset=0, kind="all"):
+    return dumps("search_results", query=query, results=results, offset=offset, kind=kind)
 
 
 def error(message):

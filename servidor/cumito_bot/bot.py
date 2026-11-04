@@ -238,6 +238,35 @@ def _flat_search(prefix: str, query: str, limit: int) -> list[dict]:
         return out
 
 
+def _music_search(query: str, limit: int) -> list[dict]:
+    """Buscar como YouTube Music, en su sección "Canciones": ahí salen las
+    versiones de audio oficiales (no el videoclip, ni covers, ni en vivo)."""
+    from urllib.parse import quote_plus
+    url = f"https://music.youtube.com/search?q={quote_plus(query)}#songs"
+    opts = dict(SEARCH_YTDL_OPTS, playlistend=max(1, min(limit, 40)))
+    with yt_dlp.YoutubeDL(_opts(opts)) as ydl:
+        info = ydl.extract_info(url, download=False)
+    out = []
+    for e in (info or {}).get("entries") or []:
+        if not e or not e.get("id"):
+            continue
+        artists = e.get("artists") or []
+        artist = (artists[0] if artists and isinstance(artists[0], str) else None) \
+            or e.get("artist") or e.get("channel") or e.get("uploader")
+        if artist and artist.endswith(" - Topic"):
+            artist = artist[:-8]
+        out.append({
+            "title": e.get("title") or e.get("track") or "Sin título",
+            "webpage_url": f"https://www.youtube.com/watch?v={e['id']}",
+            "duration": e.get("duration"),
+            "uploader": artist,
+            "art_url": _best_thumb(e),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 PLAYLIST_MAX = 200   # tope por playlist, para que una lista gigante no trabe nada
 PREFETCH_AHEAD = 5   # cuántas canciones de la cola se dejan listas de antemano
 
@@ -286,7 +315,7 @@ async def playlist_entries(url: str, limit: int = PLAYLIST_MAX) -> list[dict]:
     return await loop.run_in_executor(None, _run)
 
 
-async def search(query: str, limit: int = 8, offset: int = 0) -> list[dict]:
+async def search(query: str, limit: int = 8, offset: int = 0, kind: str = "all") -> list[dict]:
     """Varios resultados livianos para el mosaico del buscador (sin resolver
     el audio de cada uno, eso se hace recién cuando se elige y se agrega a
     la cola). Si YouTube no responde, busca en SoundCloud.
@@ -297,6 +326,13 @@ async def search(query: str, limit: int = 8, offset: int = 0) -> list[dict]:
     offset = max(0, int(offset or 0))
 
     def _run():
+        if kind == "music" and not _is_url(query):
+            try:
+                results = _music_search(query, offset + limit)[offset:]
+                if results:
+                    return results
+            except Exception as e:
+                log.warning("Búsqueda en YouTube Music falló (%s). Busco en YouTube normal...", str(e)[:120])
         try:
             results = _flat_search("ytsearch", query, offset + limit)[offset:]
             if results:
@@ -667,9 +703,9 @@ class BotCore:
             await self._play_next()
         return None
 
-    async def action_search(self, query, limit=8, offset=0):
+    async def action_search(self, query, limit=8, offset=0, kind="all"):
         try:
-            return await search(query, limit=limit, offset=offset)
+            return await search(query, limit=limit, offset=offset, kind=kind)
         except Exception:
             return []
 
