@@ -35,12 +35,12 @@ class CumitoWindow(GlassScreen):
 
     # ---------- ajustes ----------
     def settings_rows(self):
-        return ["Ver actividad", "Cambiar servidor", "Cambiar mi nombre"]
+        # (texto, ícono) -- van en la rueda de Opciones, junto a Actividad,
+        # Efecto vidrio y Apagar Cumito (esas las pone la ventana)
+        return [("Cambiar servidor", "server"), ("Cambiar mi nombre", "user")]
 
     def on_settings_row(self, label):
-        if label == "Ver actividad":
-            self.open_activity()
-        elif label == "Cambiar servidor":
+        if label == "Cambiar servidor":
             self.ask_text(
                 "Dirección del servidor (déjalo vacío para volver al de siempre)", "set_address",
                 placeholder=config.DEFAULT_SERVER, initial=self.cfg.get("host_address", ""),

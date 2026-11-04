@@ -32,7 +32,7 @@ from PySide6.QtCore import (
     QAbstractAnimation, QEasingCurve, QEvent, QParallelAnimationGroup, QPoint, QPropertyAnimation,
     QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
 )
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QCursor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -43,12 +43,14 @@ from .anim_widgets import HopLoader, Spinner, stagger_fade_in
 from .art_cache import ArtCache
 from .activity import ActivityFeed, Ticker
 from .hold import HoldButton, HoldConfirm
+from .wheel import OptionWheel
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
 PAN_MAX_W = int(W * 1.4)   # el fondo es un poco más ancho que la ventana y se pasea
 PAN_EDGE_S = 30.0          # segundos de una esquina a la otra
 PAN_TICK_MS = 80
+IDLE_S = 8.0               # sin tocar nada este tiempo: solo queda la portada y el nombre
 PANEL_TOP = 50       # donde arrancan las hojas de buscador/ajustes (debajo de cerrar/minimizar)
 CARD_W, CARD_H = 124, 158   # las cards de la vista previa de playlist
 TICK_MS = 250  # a cuánto se refresca el progreso / ecualizador -- bajo a propósito
@@ -1012,6 +1014,10 @@ class GlassScreen(QWidget):
         self._activity_loaded = False
         self._pan_range = 0              # cuánto se puede pasear el fondo (px)
         self._pan_t0 = time.monotonic()
+        self._idle = False               # modo "solo portada"
+        self._last_poke = time.monotonic()
+        self._last_cursor = None
+        self._last_option = "activity"   # la rueda de opciones abre donde quedó
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._pan_timer = QTimer(self)
@@ -1138,19 +1144,12 @@ class GlassScreen(QWidget):
         left.addWidget(title_area, 1)
         row.addLayout(left, 1)
 
-        self.btn_stop_bot = _IconButton("power", danger=True)
-        self.btn_stop_bot.setToolTip("Detener bot (sale del canal de voz)")
-        self.btn_stop_bot.clicked.connect(self._ask_stop_bot)
-        row.addWidget(self.btn_stop_bot)
-
-        self.btn_settings = _IconButton("settings")
-        self.btn_settings.setToolTip("Ajustes")
-        self.btn_settings.clicked.connect(self._open_settings)
-        row.addWidget(self.btn_settings)
-
-        self.glass_switch = _GlassSwitch(on=True)
-        self.glass_switch.toggled.connect(self._apply_glass)
-        row.addWidget(self.glass_switch)
+        # todo lo demás (apagar, vidrio, servidor, nombre, actividad...)
+        # vive en la rueda de Opciones
+        self.btn_options = _IconButton("menu")
+        self.btn_options.setToolTip("Opciones")
+        self.btn_options.clicked.connect(self._open_settings)
+        row.addWidget(self.btn_options)
 
         self.btn_minimize = _IconButton("minimize")
         self.btn_minimize.setToolTip("Minimizar")
@@ -1170,14 +1169,14 @@ class GlassScreen(QWidget):
         pill_row.addStretch()
         tlay.addLayout(pill_row)
 
-        self._chrome_widgets += [self.btn_stop_bot, self.btn_settings, self.btn_minimize, self.btn_close, self.search_pill]
+        self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill]
 
         # ---- overlay inferior: ahora sonando ----
         self.now_overlay = QWidget(self)
-        self.now_overlay.setGeometry(0, H - 230, W, 212)
+        self.now_overlay.setGeometry(0, H - 216, W, 210)
         nlay = QVBoxLayout(self.now_overlay)
-        nlay.setContentsMargins(20, 0, 20, 18)
-        nlay.setSpacing(12)
+        nlay.setContentsMargins(20, 0, 20, 6)
+        nlay.setSpacing(10)
         nlay.addStretch()
 
         self.swipe_hint = _SwipeHint()
@@ -1217,29 +1216,71 @@ class GlassScreen(QWidget):
         nlay.addLayout(prog_row)
 
         transport = QHBoxLayout()
-        transport.setSpacing(26)
+        transport.setSpacing(30)
         transport.addStretch()
-        self.btn_prev = _IconButton("prev", size=34, icon_size=16, icon_color="#111111")
+        self.btn_prev = _IconButton("prev", size=36, icon_size=20, icon_color="#FFFFFF")
         self.btn_prev.setEnabled(False)
         self.btn_prev.setToolTip("Sin historial hacia atrás por ahora")
         transport.addWidget(self.btn_prev)
-        self.btn_play = _IconButton("play", size=54, icon_size=24, icon_color="#111111")
+        self.btn_play = _IconButton("play", size=48, icon_size=20, icon_color="#FFFFFF")
         self.btn_play.clicked.connect(self._on_play_pause)
         transport.addWidget(self.btn_play)
-        self.btn_next = _IconButton("next", size=34, icon_size=16, icon_color="#111111")
+        self.btn_next = _IconButton("next", size=36, icon_size=20, icon_color="#FFFFFF")
         self.btn_next.clicked.connect(lambda: self.send_command("skip"))
         transport.addWidget(self.btn_next)
         transport.addStretch()
         nlay.addLayout(transport)
 
-        # botones del transporte: blancos y opacos siempre (no forman parte
-        # del "chrome" translúcido, van directo sobre la portada)
-        for b in (self.btn_prev, self.btn_play, self.btn_next):
+        # atrás / siguiente: solo el ícono, sin círculo. Play/pausa: un
+        # círculo de vidrio ("liquid"): medio transparente, con borde y un
+        # brillo arriba, nada de blanco sólido.
+        for b in (self.btn_prev, self.btn_next):
             b.setStyleSheet(
-                "QPushButton { background: rgba(255,255,255,0.92); color:#111; border:none; border-radius: %dpx; font-size: 15px; }"
-                "QPushButton:disabled { background: rgba(255,255,255,0.35); color: rgba(0,0,0,0.4); }"
-                % (b.width() // 2)
+                "QPushButton { background: transparent; border:none; border-radius: 18px; }"
+                "QPushButton:hover { background: rgba(255,255,255,0.10); }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.05); }"
             )
+        self.btn_play.setStyleSheet(
+            "QPushButton { border-radius: 24px;"
+            " background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.30),"
+            " stop:0.55 rgba(255,255,255,0.13), stop:1 rgba(255,255,255,0.20));"
+            " border: 1px solid rgba(255,255,255,0.42); border-top: 1px solid rgba(255,255,255,0.80); }"
+            "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.40),"
+            " stop:0.55 rgba(255,255,255,0.20), stop:1 rgba(255,255,255,0.27)); }"
+            "QPushButton:pressed { background: rgba(255,255,255,0.12); }"
+        )
+
+        # ---- modo "solo portada" (después de IDLE_S sin tocar nada) ----
+        # Solo queda la portada y, abajo, el nombre y el artista sobre un
+        # degradado más bajito. Al mover el mouse vuelve todo.
+        self.scrim_names = QLabel(self)
+        self.scrim_names.setGeometry(0, H - 150, W, 150)
+        self.scrim_names.setAttribute(Qt.WA_TransparentForMouseEvents)
+        spix = QPixmap(W, 150)
+        spix.fill(Qt.transparent)
+        sp = QPainter(spix)
+        sg = QLinearGradient(0, 0, 0, 150)
+        sg.setColorAt(0.0, QColor(8, 8, 11, 0))
+        sg.setColorAt(0.55, QColor(8, 8, 11, 120))
+        sg.setColorAt(1.0, QColor(8, 8, 11, 200))
+        sp.fillRect(spix.rect(), sg)
+        sp.end()
+        self.scrim_names.setPixmap(spix)
+        self.scrim_names.hide()
+        self.idle_caption = QWidget(self)
+        self.idle_caption.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.idle_caption.setGeometry(22, H - 70, W - 44, 50)
+        cap = QVBoxLayout(self.idle_caption)
+        cap.setContentsMargins(0, 0, 0, 0)
+        cap.setSpacing(1)
+        self.idle_title = _ElidedLabel("")
+        self.idle_title.setStyleSheet("color:#fff; font-size:17px; font-weight:800; background:transparent;")
+        self.idle_artist = _ElidedLabel("")
+        self.idle_artist.setStyleSheet("color: rgba(255,255,255,0.68); font-size:12.5px; background:transparent;")
+        cap.addWidget(self.idle_title)
+        cap.addWidget(self.idle_artist)
+        self.idle_caption.hide()
+        self._idle_fx = {}   # widget -> efecto de opacidad (solo durante el modo)
 
         # ---- estado vacío: "¿Qué escucharemos hoy?" ----
         # Se ve cuando no suena nada: Cumito feliz, lo último que sonó en
@@ -1535,16 +1576,19 @@ class GlassScreen(QWidget):
         self.btn_settings_back.clicked.connect(self._close_settings)
         self._chrome_widgets.append(self.btn_settings_back)
         sthead.addWidget(self.btn_settings_back)
-        st_title = QLabel("Ajustes")
-        st_title.setStyleSheet("color:#fff; font-size:17px; font-weight:800; background:transparent;")
-        sthead.addWidget(st_title)
         sthead.addStretch()
         stlay.addLayout(sthead)
-        stlay.addSpacing(6)
-        self.settings_list_layout = QVBoxLayout()
-        self.settings_list_layout.setSpacing(6)
-        stlay.addLayout(self.settings_list_layout)
-        stlay.addStretch()
+        st_title = QLabel("Opciones")
+        st_title.setStyleSheet("color:#fff; font-size:30px; font-weight:800; background:transparent;"
+                               " padding-left:6px;")
+        stlay.addWidget(st_title)
+        st_sub = QLabel("Gira la rueda del mouse\ny toca la que quieras")
+        st_sub.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:11px; background:transparent;"
+                             " padding-left:7px;")
+        stlay.addWidget(st_sub)
+        self.option_wheel = OptionWheel()
+        self.option_wheel.activated.connect(self._on_option)
+        stlay.addWidget(self.option_wheel, 1)
 
         # ---- actividad: otra hoja, estilo chat ----
         self.activity_view = _GlassPanel(self, top_radius=22, tint_alpha=170)
@@ -1965,6 +2009,8 @@ class GlassScreen(QWidget):
 
         self._showing_placeholder = False
         self.now_title.setText(np["title"])
+        self.idle_title.setText(np["title"])
+        self.idle_artist.setText(np.get("uploader") or "")
         self.mp_title.setText(np["title"])
         self.now_artist.setText(np.get("uploader") or "")
         self.mp_artist.setText(np.get("uploader") or "")
@@ -2468,6 +2514,16 @@ class GlassScreen(QWidget):
         stagger_fade_in(self, new_tiles)
 
     # ---- ajustes (pantalla propia) ----
+    def _option_items(self):
+        items = [{"key": "activity", "label": "Actividad", "icon": "chat"},
+                 {"key": "glass", "label": "Efecto vidrio", "icon": "sparkle",
+                  "hint": "Encendido" if self._glass_on else "Apagado"}]
+        for row in self.settings_rows():
+            label, icon = (row, "settings") if isinstance(row, str) else row
+            items.append({"key": "row:" + label, "label": label, "icon": icon})
+        items.append({"key": "power", "label": "Apagar Cumito", "icon": "power", "danger": True})
+        return items
+
     def _open_settings(self):
         if self._panel_mode == "search":
             self.search_view.hide()
@@ -2478,24 +2534,24 @@ class GlassScreen(QWidget):
         self._panel_mode = "settings"
         self._searching = True
         self.search_pill.setVisible(False)
-        lay = self.settings_list_layout
-        while lay.count():
-            item = lay.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        for label in self.settings_rows():
-            btn = QPushButton(label)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(46)
-            btn.setStyleSheet(
-                f"QPushButton {{ text-align:left; padding-left:14px; background: rgba(255,255,255,0.07);"
-                f" color:{theme.GLASS_TEXT}; border:1px solid rgba(255,255,255,0.10); border-radius:12px; font-size:12.5px; }}"
-                f"QPushButton:hover {{ background: rgba(255,255,255,0.13); }}"
-            )
-            btn.clicked.connect(lambda _=False, l=label: (self._close_settings(), self.on_settings_row(l)))
-            lay.addWidget(btn)
+        self.option_wheel.set_items(self._option_items(), keep_key=self._last_option)
         self._panel_in(self.settings_view)
         self.text_overlay.raise_()
+        self.option_wheel.setFocus()
+
+    def _on_option(self, key):
+        self._last_option = key
+        if key == "glass":
+            self._apply_glass(not self._glass_on)
+            self.option_wheel.set_items(self._option_items(), keep_key="glass")
+        elif key == "activity":
+            self.open_activity()
+        elif key == "power":
+            self._close_settings()
+            self._ask_stop_bot()
+        elif key.startswith("row:"):
+            self._close_settings()
+            self.on_settings_row(key[4:])
 
     def _close_settings(self):
         self._panel_out(self.settings_view)
@@ -2551,6 +2607,96 @@ class GlassScreen(QWidget):
                     self._pan_timer.start(PAN_TICK_MS)
         super().changeEvent(ev)
 
+    # ================= modo "solo portada" =================
+    def enterEvent(self, ev):
+        self._poke()
+        super().enterEvent(ev)
+
+    def _poke(self):
+        self._last_poke = time.monotonic()
+        if self._idle:
+            self._set_idle(False)
+
+    def _idle_blocked(self):
+        return bool(
+            self._panel_mode or self._sheet_open or self._empty_mode
+            or not self.state.get("now_playing")
+            or self.hold_confirm.isVisible() or self.text_overlay.isVisible()
+            or (self.update_banner.isVisible() and self.update_banner.y() > 0)
+        )
+
+    def _check_idle(self):
+        # el mouse se movió encima de la ventana = alguien está mirando
+        pos = QCursor.pos()
+        if pos != self._last_cursor:
+            self._last_cursor = pos
+            if self.frameGeometry().contains(pos):
+                self._poke()
+        if self._idle_blocked():
+            self._last_poke = time.monotonic()
+            if self._idle:
+                self._set_idle(False)
+        elif not self._idle and time.monotonic() - self._last_poke > IDLE_S:
+            self._set_idle(True)
+
+    def _idle_opacity(self, widget, show, ms, keep_effect=False):
+        fx = self._idle_fx.get(widget)
+        if fx is not None and widget.graphicsEffect() is not fx:
+            fx = None  # otra animación le cambió el efecto: se arma uno nuevo
+        if fx is None:
+            fx = QGraphicsOpacityEffect(widget)
+            fx.setOpacity(0.0 if show else 1.0)
+            widget.setGraphicsEffect(fx)
+            self._idle_fx[widget] = fx
+        if show:
+            widget.show()
+        anim = QPropertyAnimation(fx, b"opacity", self)
+        anim.setDuration(ms)
+        anim.setStartValue(fx.opacity())
+        anim.setEndValue(1.0 if show else 0.0)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+        def done():
+            if not show:
+                widget.hide()
+            if show and not keep_effect:
+                # visible del todo: se quita el efecto (no cuesta nada mientras se usa)
+                widget.setGraphicsEffect(None)
+                self._idle_fx.pop(widget, None)
+        anim.finished.connect(done)
+        self._anims[("idle", id(widget))] = anim
+        anim.start()
+
+    def _set_idle(self, on):
+        if on == self._idle:
+            return
+        self._idle = on
+        ms = 700 if on else 380
+        # barra de arriba: se va hacia arriba / vuelve
+        tb = QPropertyAnimation(self.titlebar, b"pos", self)
+        tb.setDuration(ms)
+        tb.setStartValue(self.titlebar.pos())
+        tb.setEndValue(QPoint(0, -self.titlebar.height() - 6) if on else QPoint(0, 0))
+        tb.setEasingCurve(QEasingCurve.InOutCubic)
+        self._anims["idle_tb"] = tb
+        tb.start()
+        self._idle_opacity(self.scrim_top, not on, ms, keep_effect=True)
+        self._idle_opacity(self.scrim_bottom, not on, ms, keep_effect=True)
+        self._idle_opacity(self.scrim_names, on, ms, keep_effect=True)
+        if on or not self._empty_mode:
+            self._idle_opacity(self.now_overlay, not on, ms)
+        # el nombre baja a su lugar mientras aparece (o sube al irse)
+        self.idle_caption.raise_()
+        self._idle_opacity(self.idle_caption, on, ms, keep_effect=True)
+        cap = QPropertyAnimation(self.idle_caption, b"pos", self)
+        cap.setDuration(ms)
+        low, high = QPoint(22, H - 70), QPoint(22, H - 150)
+        cap.setStartValue(high if on else self.idle_caption.pos())
+        cap.setEndValue(low if on else high)
+        cap.setEasingCurve(QEasingCurve.OutCubic if on else QEasingCurve.InCubic)
+        self._anims["idle_cap"] = cap
+        cap.start()
+
     # ================= el fondo se pasea lento de lado a lado =================
     def _on_pan(self):
         if self._pan_range <= 0:
@@ -2566,6 +2712,7 @@ class GlassScreen(QWidget):
 
     # ================= animación / reloj =================
     def _on_tick(self):
+        self._check_idle()
         np = self.state.get("now_playing")
         if np and not np.get("paused") and self.state.get("connected", True):
             self._local_elapsed += TICK_MS / 1000

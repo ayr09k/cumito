@@ -17,7 +17,19 @@ OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "vista_previa")
 OUT.mkdir(parents=True, exist_ok=True)
 app = QApplication(sys.argv)
 
+import cumito.glass_screen as gs  # noqa: E402
 from cumito.glass_screen import GlassScreen  # noqa: E402
+
+gs.IDLE_S = 1e9   # en las fotos el modo "solo portada" se activa a mano
+
+
+def _guardar_error(*exc):
+    import traceback
+    (OUT / "ERROR.txt").write_text("".join(traceback.format_exception(*exc)), encoding="utf-8")
+    sys.__excepthook__(*exc)
+
+
+sys.excepthook = _guardar_error
 
 
 def wait(ms):
@@ -73,11 +85,33 @@ state = {
 }
 
 w = GlassScreen()
+w.settings_rows = lambda: [("Cambiar servidor", "server"), ("Cambiar mi nombre", "user")]
 w.show()
 w.set_state(state)
 w._set_art_background(fake_art())
 wait(500)
 shot(w, "01_principal")
+
+# rueda de opciones
+w._open_settings()
+wait(500)
+shot(w, "01b_opciones")
+w.option_wheel.go(2)
+wait(150)
+shot(w, "01c_opciones_girando")
+wait(500)
+shot(w, "01d_opciones_en_servidor")
+w._close_settings()
+wait(500)
+
+# modo solo portada (8 s sin tocar nada)
+w._last_cursor = None
+w._set_idle(True)
+wait(900)
+shot(w, "01e_solo_portada")
+w._set_idle(False)
+wait(600)
+shot(w, "01f_vuelve_todo")
 
 # fondo paseándose: 15 s después (mitad del recorrido)
 w._pan_t0 -= 15

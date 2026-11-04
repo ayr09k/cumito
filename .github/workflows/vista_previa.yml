@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -q -r app/requirements.txt
           python app/herramientas/vista_previa.py "$env:RUNNER_TEMP\fotos"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ($LASTEXITCODE -ne 0) { "fallo" | Out-File "$env:RUNNER_TEMP\fotos\FALLO.txt" }
       - name: Subir a la rama vista-previa
         shell: pwsh
         run: |
