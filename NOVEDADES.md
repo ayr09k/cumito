@@ -1,6 +1,5 @@
-## Cumito 1.2.2
+## Cumito 1.3
 
-- Los títulos largos se cortan con "…" y ya no tapan la X ni se salen de la lista o del buscador.
-- "Borrar lista", "Apagar a Cumito" y "No gracias" ahora se hacen manteniendo presionado 2 segundos: un borde rojo da la vuelta al botón y este tiembla cada vez más. Si sueltas antes, no pasa nada.
-- El "PLAYLIST" de abajo tiene unas flechitas que suben cada 3 segundos, y se puede tocar para abrir la lista.
-- La pantalla de actividad se ve más ordenada.
+- Arriba ya no hay tantos botones: uno solo de **Opciones** abre una rueda en curva (Actividad, Efecto vidrio, Cambiar servidor, Cambiar mi nombre, Apagar Cumito). Se gira con la rueda del mouse, con un "tic" en cada paso, como el selector de un iPhone.
+- Si pasan 8 segundos sin mover el mouse sobre Cumito, solo queda la portada con el nombre y el artista. Al mover el mouse vuelve todo.
+- Controles nuevos: atrás y siguiente sin círculo, y play/pausa de vidrio, un poco más pequeños y más abajo.
