@@ -3826,7 +3826,10 @@ class GlassScreen(QWidget):
     def _check_streamer_idle(self):
         """En modo streamer, 8 s sin tocar nada = vuelve solo al mini.
         Si Cumito está minimizado, NO: se queda minimizado."""
-        if self._is_minimized():
+        # Tampoco si Cumito no es la ventana activa (estás en un juego, en
+        # otra ventana, o Windows lo escondió con Win+D): el mini va siempre
+        # encima y aparecería en medio del juego.
+        if self._is_minimized() or not self.isActiveWindow():
             self._last_poke = time.monotonic()
             return
         pos = QCursor.pos()

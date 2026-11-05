@@ -1,3 +1,7 @@
+## Cumito 2.2.4
+
+- Arreglado: en modo streamer, el mini ya no aparece solo encima de un juego u otra ventana. Ahora solo cambia al mini cuando Cumito es la ventana que estás usando.
+
 ## Cumito 2.2.3
 
 - **Corazón en cualquier canción:** pasa el mouse por un resultado del buscador o por una canción de la lista y toca el ♡ para guardarla en un disco, sin tener que escucharla.
