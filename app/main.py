@@ -383,7 +383,35 @@ def _restart():
     QApplication.instance().quit()
 
 
+def _autoprueba():
+    """Cumito.exe --autoprueba <archivo>: abre la ventana nueva (motor web),
+    espera a que la página conteste y anota el resultado. Lo usa GitHub para
+    comprobar que el programa ya armado funciona."""
+    out = Path(sys.argv[sys.argv.index("--autoprueba") + 1])
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    app = QApplication(sys.argv)
+    from cumito import theme
+    fam = theme.load_fonts(app)
+    lines = [f"motor web disponible: {liquid_window.AVAILABLE}", f"letra: {fam}"]
+    if liquid_window.AVAILABLE:
+        class Core:
+            cfg, recent_searches, visual, ui_scale = {"display_name": "Prueba"}, [], {}, 1.0
+            def send_command(self, *a, **k): pass
+            def liquid_ready(self): lines.append("la página respondió")
+        w = liquid_window.LiquidWindow(Core())
+        w.show()
+        t0 = __import__("time").time()
+        while not w._ready and __import__("time").time() - t0 < 30:
+            app.processEvents()
+            __import__("time").sleep(0.05)
+        lines.append(f"lista: {w._ready}")
+    out.write_text("\n".join(lines), encoding="utf-8")
+    sys.exit(0)
+
+
 def main():
+    if "--autoprueba" in sys.argv:
+        _autoprueba()
     sys.excepthook = _log_uncaught
     cfg = config.load()
     # Tamaño de toda la ventana (Opciones -> Apariencia -> Tamaño). Qt lo

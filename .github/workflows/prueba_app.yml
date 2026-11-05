@@ -1,0 +1,42 @@
+name: Prueba del programa armado
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probar:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Armar y abrir
+        run: |
+          python -m pip install --disable-pip-version-check -q -r app/requirements.txt "pyinstaller>=6.0"
+          python app/herramientas/bajar_fuentes.py
+          $W = $env:GITHUB_WORKSPACE; $A = "$W\app"; $T = "$W\_construccion"
+          python -m PyInstaller --noconfirm --clean --log-level WARN --onedir --windowed --name Cumito `
+            --contents-directory archivos --icon "$A\assets\cumito.ico" --add-data "$A\assets;assets" `
+            --distpath "$T\dist" --workpath "$T\build_app" --specpath "$T" "$A\main.py"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\res" | Out-Null
+          $p = Start-Process "$T\dist\Cumito\Cumito.exe" -ArgumentList "--autoprueba","$env:RUNNER_TEMP\res\resultado.txt" -PassThru -Wait
+          "codigo de salida: $($p.ExitCode)" | Out-File -Append "$env:RUNNER_TEMP\res\resultado.txt"
+          Get-ChildItem "$T\dist\Cumito\archivos\PySide6" -Filter "QtWebEngineProcess*" -Recurse | ForEach-Object { $_.FullName } | Out-File -Append "$env:RUNNER_TEMP\res\resultado.txt"
+          if (Test-Path "$HOME\Cumito_pagina.txt") { Copy-Item "$HOME\Cumito_pagina.txt" "$env:RUNNER_TEMP\res\" }
+          if (Test-Path "$HOME\Cumito_error.txt") { Copy-Item "$HOME\Cumito_error.txt" "$env:RUNNER_TEMP\res\" }
+      - name: Guardar en la rama pruebas
+        run: |
+          cd "$env:RUNNER_TEMP\res"
+          git init -q -b pruebas
+          git config user.name cumito-bot
+          git config user.email cumito-bot@users.noreply.github.com
+          git add -A
+          git commit -q -m "prueba app $env:GITHUB_SHA"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" pruebas
