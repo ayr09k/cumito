@@ -147,7 +147,12 @@ class Salud:
             ytv = yt_dlp.version.__version__
         except Exception:
             ytv = "?"
-        version = _read(HERE / ".version").strip() or "sin dato"
+        # el nombre de la versión (p. ej. "2.0") viene con cada actualización;
+        # .version dice de qué día es lo que quedó instalado
+        name = _read(HERE / "VERSION_SERVIDOR.txt").strip()
+        stamp = _read(HERE / ".version").strip()
+        day = stamp.split("·")[-1].strip() if "·" in stamp else stamp
+        version = (f"{name} ({day})" if name and day else name or stamp) or "sin dato"
         pend = HERE / ".actualizacion_pendiente"
         queue = list(bot.queue)
         return {
