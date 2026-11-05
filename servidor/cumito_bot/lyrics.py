@@ -16,7 +16,7 @@ UA = "Cumito (https://github.com/ayr09k/cumito)"
 # lo que YouTube le pega al título y estorba para encontrar la letra
 _NOISE = re.compile(
     r"\s*[\(\[\{][^\)\]\}]*\b(official|oficial|video|audio|lyric|letra|visualizer|visualiser|remaster|"
-    r"hd|4k|mv|en vivo|live|explicit|clean|prod)\b[^\)\]\}]*[\)\]\}]",
+    r"hd|4k|mv|en vivo|live|explicit|clean|prod|remaster\w*|remasterizad\w*)\b[^\)\]\}]*[\)\]\}]",
     re.I)
 _FEAT = re.compile(r"\s*[\(\[]?\s*(ft\.?|feat\.?|featuring|con)\s+[^\)\]\-]*[\)\]]?", re.I)
 

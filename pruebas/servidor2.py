@@ -30,8 +30,9 @@ for t, a, d in [("Ojitos Lindos", "Bad Bunny, Bomba Estéreo", 258),
     probar(f"letra {t}", lambda t=t, a=a, d=d: {**(r := lyrics.fetch(t, a, d)),
                                                  "synced": (r.get("synced") or "")[:160],
                                                  "plain": (r.get("plain") or "")[:80]})
-probar("radio", lambda: X.radio_sync("https://www.youtube.com/watch?v=lQsY4n-1ugk", 8))
 probar("búsqueda música", lambda: X.search_sync("ojitos lindos", 4, 0, "music"))
+semilla = (out["búsqueda música"].get("resultado") or [{}])[0].get("webpage_url") or "https://www.youtube.com/watch?v=7GDp7S1HgSk"
+probar("radio", lambda: X.radio_sync(semilla, 8))
 probar("resolver 'busca:'", lambda: X._resolve_search("Bad Bunny - Tití Me Preguntó"))
 probar("preparar 'busca:'", lambda: {k: v for k, v in X._extract_sync("busca:Bad Bunny - Tití Me Preguntó").items()
                                      if k in ("title", "webpage_url", "duration", "uploader", "source")})
