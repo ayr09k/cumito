@@ -1441,6 +1441,7 @@ class GlassScreen(QWidget):
         pill_row.addWidget(self.mini_pill)
         pill_row.addStretch()
         tlay.addLayout(pill_row)
+        tlay.addStretch()   # que la fila de arriba no se corra hacia abajo si se esconden las píldoras
 
         self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill,
                                  self.discos_pill, self.mini_pill]
@@ -3120,7 +3121,7 @@ class GlassScreen(QWidget):
         self.search_view.raise_()
         self.search_morph.raise_()
         QTimer.singleShot(120, lambda: self._panel_mode == "search" and self._fade(self.search_view, True, 420))
-        self.mini_player.show()
+        self.mini_player.setVisible(bool(self.state.get("now_playing")))
         self.mini_player.raise_()
         self.text_overlay.raise_()
         self.toast.raise_()
@@ -3174,7 +3175,7 @@ class GlassScreen(QWidget):
         self.results_scroll.setVisible(state == "results")
         self.preview_box.setVisible(state == "preview")
         if self._panel_mode == "search":
-            self.mini_player.setVisible(state != "preview")
+            self.mini_player.setVisible(state != "preview" and bool(self.state.get("now_playing")))
 
     def _on_search_text_changed(self, text):
         if not text.strip() and self._panel_mode == "search":

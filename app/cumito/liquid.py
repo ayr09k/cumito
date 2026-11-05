@@ -246,7 +246,7 @@ class Chip(QPushButton):
         super().__init__(" " + text, parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(32)
-        self.setIcon(icons.icon("timer", "#BDB8CC", 12))
+        self.setIcon(icons.icon("clock", "#BDB8CC", 12))
         self.setIconSize(QSize(12, 12))
         self.setStyleSheet(
             "QPushButton { background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.12);"
@@ -282,13 +282,16 @@ class FlowBox(QWidget):
         W = max(60, self.width())
         for w in self.items:
             s = w.sizeHint()
+            h = max(s.height(), w.minimumHeight())
             if x and x + s.width() > W:
                 x, y = 0, y + line_h + self.gap
                 line_h = 0
-            w.setGeometry(x, y, min(s.width(), W), s.height())
+            w.setGeometry(x, y, min(s.width(), W), h)
             x += s.width() + self.gap
-            line_h = max(line_h, s.height())
-        self.setFixedHeight(y + line_h if self.items else 0)
+            line_h = max(line_h, h)
+        total = y + line_h if self.items else 0
+        if self.height() != total:
+            self.setFixedHeight(total)
 
 
 # ---------------------------------------------------------------------------
@@ -486,10 +489,9 @@ class Members(QWidget):
         if not others:
             return "Solo tú por ahora" if has_me else "Nadie conectado"
         if len(others) > 3:
-            shown = ", ".join(others[:2]) + f" y {len(others) - 2} más"
-        else:
-            shown = ", ".join(others[:-1]) + (" y " if len(others) > 1 else "") + others[-1]
-        return shown + (" y tú" if has_me else "")
+            others = others[:2] + [f"{len(others) - 2} más"]
+        parts = others + (["tú"] if has_me else [])
+        return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " y " + parts[-1]
 
     def paintEvent(self, ev):
         p = QPainter(self)
