@@ -148,6 +148,7 @@ win.push("albums", {"albums": [
      "arts": [r["art_url"] for r in recent]},
     {"id": 2, "name": "Para estudiar", "owner": "Pedro", "color": "#1F2D5C", "count": 41, "arts": []}]})
 shot("w09_discos", 1800)
+shot("w09b_discos_despues", 3500)
 js("closePanel(); openPanel('status')")
 win.push("status", {"cpu": 23, "cpu_hist": [20 + (i % 9) * 3 for i in range(90)], "steal": 2,
                     "steal_hist": [2] * 90, "cores": 2, "mem": {"total": 1e9, "used": 6.1e8},
@@ -157,6 +158,7 @@ win.push("status", {"cpu": 23, "cpu_hist": [20 + (i % 9) * 3 for i in range(90)]
                     "queue": {"total": 14, "prepared": 5}, "playing": "Ojitos Lindos",
                     "versions": {"server": "2.1 (2026-11-04)", "yt_dlp": "2026.10.22"}, "time": now, "logs": []})
 shot("w10_estado", 2000)
+shot("w10b_estado_despues", 3500)
 js("closePanel()")
 wait(600)
 win.window_command("drag")   # no debe romper nada aunque no haya mouse
