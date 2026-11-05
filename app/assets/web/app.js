@@ -25,7 +25,7 @@ function pcolor(name) { if (!name) return '#8E6CF2'; if (name === 'Cumito') retu
 function initial(name) { return esc((name || '?').trim().charAt(0).toUpperCase()); }
 const FALLBACK = ['linear-gradient(135deg,#E0457B,#6C4CF5)', 'linear-gradient(135deg,#22A699,#1F5FBF)', 'linear-gradient(135deg,#F7A35C,#6C4CF5)', 'linear-gradient(135deg,#B8323A,#3A2D6B)', 'linear-gradient(135deg,#E87AA4,#5A3FC0)'];
 function coverStyle(url, seed) {
-  if (url) return 'background-image:' + bgUrl(url);
+  if (url) return 'background-image:' + bgUrl(url) + (/\/(hq|mq|sd)default\.jpg/.test(url) ? ';background-size:auto 134%' : '');
   let n = 0; for (const c of String(seed || 'x')) n += c.codePointAt(0);
   return 'background-image:' + FALLBACK[n % FALLBACK.length];
 }
@@ -153,6 +153,7 @@ function setArt(url) {
   const nxt = artA ? $('art2') : $('art');
   if (cur.dataset.url === (url || '')) return;
   nxt.style.backgroundImage = url ? bgUrl(url) : FALLBACK[0];
+  nxt.style.backgroundSize = url && /\/(hq|mq|sd)default\.jpg/.test(url) ? 'auto 134%' : 'cover';
   nxt.dataset.url = url || '';
   nxt.classList.remove('next');
   cur.classList.add('next');
@@ -836,6 +837,15 @@ function optItems() {
     { key: 'power', label: 'Apagar Cumito', icon: 'power', danger: true });
   return it;
 }
+const ICON_CACHE = {};
+function iconUrl(name, color) {
+  const k = name + color;
+  if (!ICON_CACHE[k]) {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + IC[name] + '"/></svg>';
+    ICON_CACHE[k] = "url('data:image/svg+xml;base64," + btoa(svg) + "')";
+  }
+  return ICON_CACHE[k];
+}
 let AC = null;
 function tick() {
   try {
@@ -872,7 +882,7 @@ function renderOptions(newTitle) {
     const stroke = i === OPT.sel ? '#18171C' : (it.danger ? '#FF8C8C' : '#F2F0F7');
     return '<button class="it ' + (i === OPT.sel ? 'sel ' : '') + (it.danger ? 'danger' : '') + '" type="button" data-wi="' + i + '" style="transform:translate(' + (right - 290).toFixed(1) + 'px,' + (ay - 22).toFixed(1) + 'px);opacity:' + o.toFixed(2) + (o === 0 ? ';pointer-events:none' : '') + '">' +
       '<span class="lb">' + esc(it.label) + '<span class="hn ' + (OPT.pop === it.key ? 'pop' : '') + '">' + esc(it.hint || '') + '</span></span>' +
-      '<span class="bx"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + IC[it.icon] + '"/></svg></span></button>';
+      '<span class="bx"><i class="wi" style="background-image:' + iconUrl(it.icon, stroke) + '"></i></span></button>';
   });
   // se reutilizan los botones para que se deslicen (no se rehacen)
   if (box.children.length === list.length && !newTitle) {
