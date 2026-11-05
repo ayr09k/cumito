@@ -11,13 +11,14 @@ from pathlib import Path
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 sys.path.insert(0, str(BASE))
 
-from PySide6.QtCore import QObject, QTimer, Slot
+from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from cumito import config
 from cumito.connect_screen import ConnectScreen
 from cumito.glass_screen import GlassScreen
+from cumito import liquid_window
 from cumito.mediakeys import MediaKeys
 from cumito.presence import DiscordPresence
 from cumito.runtime import CumitoRuntime
@@ -40,6 +41,100 @@ class CumitoWindow(GlassScreen):
         self.presence = DiscordPresence()
         self.media_keys = MediaKeys(QApplication.instance(), self, self._on_media_key)
         QTimer.singleShot(0, self._apply_integrations)
+        # 2.2: el modo normal es el diseño del lienzo (motor web); el modo
+        # streamer usa esta ventana clásica, que casi no gasta
+        self.liquid = None
+        if liquid_window.AVAILABLE:
+            try:
+                self.liquid = liquid_window.LiquidWindow(self)
+                self.liquid.setWindowIcon(self.windowIcon())
+            except Exception:
+                self.liquid = None
+        if self.uses_liquid():
+            self._timer.stop()
+            self._pan_timer.stop()
+        self._last_state = None
+
+    # ---------- qué ventana se ve ----------
+    def uses_liquid(self):
+        return self.liquid is not None and not self.visual.get("streamer")
+
+    def active_window(self):
+        return self.liquid if self.uses_liquid() else self
+
+    def switch_to_classic(self):
+        """Desde el modo normal: Opciones -> Modo streamer."""
+        if self.liquid is None:
+            return
+        self.visual["streamer"] = True
+        self.cfg["visual"] = dict(self.visual)
+        config.save(self.cfg)
+        self.move(self.liquid.pos())
+        self.liquid.hide()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self._set_pills_visible(not self._empty_mode and not self._panel_mode)
+
+    def switch_to_liquid(self):
+        """Desde la clásica: apagaron el modo streamer."""
+        if self.liquid is None:
+            return
+        pos = self.mini.pos() if (self.mini is not None and self.mini.isVisible()) else self.pos()
+        if self.mini is not None:
+            self.mini.hide()
+        if self._panel_mode == "settings":
+            self._close_settings()
+        self.hide()
+        self.liquid.move(pos)
+        self.liquid.push_config()
+        self.liquid.show()
+        self.liquid.raise_()
+        self.liquid.activateWindow()
+
+    def liquid_ready(self):
+        if self._last_state is not None:
+            self.liquid.push("state", self._last_state)
+
+    def liquid_save(self, key, value):
+        if key == "visual" and isinstance(value, dict):
+            self.visual.update({k: v for k, v in value.items() if k in self.visual})
+            self.on_visual_changed(dict(self.visual))
+        elif key == "recent_searches" and isinstance(value, list):
+            self.recent_searches = [str(x) for x in value][:6]
+            self.on_recent_searches_changed(list(self.recent_searches))
+        elif key == "display_name":
+            self._on_text_submitted("rename", str(value or ""))
+            if self.liquid:
+                self.liquid.push_config()
+        elif key == "host_address":
+            self._on_text_submitted("set_address", str(value or ""))
+
+    # ---------- el aviso de actualización también en la ventana nueva ----------
+    def show_update(self, version):
+        super().show_update(version)
+        if self.liquid:
+            self.liquid.push("update", {"state": "available", "version": version})
+
+    def set_update_progress(self, f):
+        super().set_update_progress(f)
+        if self.liquid:
+            self.liquid.push("update", {"state": "progress", "f": f})
+
+    def set_update_installing(self):
+        super().set_update_installing()
+        if self.liquid:
+            self.liquid.push("update", {"state": "installing"})
+
+    def set_update_failed(self, message=""):
+        super().set_update_failed(message)
+        if self.liquid:
+            self.liquid.push("update", {"state": "failed", "message": message})
+
+    def hide_update(self):
+        super().hide_update()
+        if self.liquid:
+            self.liquid.push("update", {"state": "hide"})
 
     def my_name(self):
         return self.cfg.get("display_name") or None
@@ -97,7 +192,8 @@ class CumitoWindow(GlassScreen):
 
     def on_scale_changed(self, scale):
         self.cfg["ui_scale"] = scale
-        self.cfg["win_pos"] = [self.x(), self.y()]   # que vuelva a abrir en el mismo lugar
+        w = self.active_window()
+        self.cfg["win_pos"] = [w.x(), w.y()]   # que vuelva a abrir en el mismo lugar
         config.save(self.cfg)
         QTimer.singleShot(150, _restart)
 
@@ -105,6 +201,10 @@ class CumitoWindow(GlassScreen):
         self.cfg["visual"] = visual
         config.save(self.cfg)
         self._apply_integrations()
+        # en la clásica apagaron el modo streamer: vuelve el diseño normal
+        if self.liquid is not None and not visual.get("streamer") and (
+                self.isVisible() or (self.mini is not None and self.mini.isVisible())):
+            QTimer.singleShot(250, self.switch_to_liquid)
 
     # ---------- búsqueda ----------
     def on_recent_searches_changed(self, searches):
@@ -142,6 +242,12 @@ class CumitoWindow(GlassScreen):
             return
         while not self.runtime.events.empty():
             kind, payload = self.runtime.events.get()
+            if self.liquid is not None:
+                if kind == "state":
+                    self._last_state = payload
+                if kind == "connected" and not payload:
+                    self._last_state = None
+                self.liquid.push(kind, payload)
             if kind == "state":
                 self.set_state({**payload, "connected": True})
                 if payload.get("app_id"):
@@ -289,6 +395,7 @@ def main():
         scale = 1.0
     if scale < 0.999:
         os.environ["QT_SCALE_FACTOR"] = f"{scale:.2f}"
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     from cumito import theme
     theme.load_fonts(app)
@@ -308,7 +415,7 @@ def main():
 
     def after_splash():
         if not first_time:
-            fade_in_window(win)
+            fade_in_window(win.active_window())
             return
         connect = ConnectScreen(default_address=cfg.get("host_address", ""),
                                 default_name=cfg.get("display_name", ""))
@@ -318,7 +425,7 @@ def main():
             win.cfg["host_address"] = address
             win.cfg["display_name"] = name
             config.save(win.cfg)
-            fade_in_window(win)   # primero se muestra la nueva...
+            fade_in_window(win.active_window())   # primero se muestra la nueva...
             connect.close()       # ...y recién después se cierra esta
             win._connect()
 
@@ -334,6 +441,8 @@ def main():
         pos = cfg.get("win_pos")
         if isinstance(pos, list) and len(pos) == 2:
             win.move(int(pos[0]), int(pos[1]))
+            if win.liquid is not None:
+                win.liquid.move(int(pos[0]), int(pos[1]))
         after_splash()
         QTimer.singleShot(1500, win._update_ctl.updater.check)
     else:
