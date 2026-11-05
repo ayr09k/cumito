@@ -1,0 +1,11 @@
+motor web disponible: True
+letra: Manrope ExtraLight
+carpeta: D:\a\cumito\cumito\_construccion\dist\Cumito\archivos\assets\fonts
+archivos: ['.gitignore', 'Manrope-Bold-latin.ttf', 'Manrope-ExtraBold-latin.ttf', 'Manrope-Medium-latin.ttf', 'Manrope-SemiBold-latin.ttf', 'OFL.txt']
+  Manrope-Bold-latin.ttf: id=4 familias=['Manrope ExtraLight']
+  Manrope-ExtraBold-latin.ttf: id=5 familias=['Manrope ExtraLight', 'Manrope ExtraLight ExtraBold']
+  Manrope-Medium-latin.ttf: id=6 familias=['Manrope ExtraLight', 'Manrope ExtraLight Medium']
+  Manrope-SemiBold-latin.ttf: id=7 familias=['Manrope ExtraLight', 'Manrope ExtraLight SemiBold']
+la página respondió
+lista: Truecodigo de salida: 0
+D:\a\cumito\cumito\_construccion\dist\Cumito\archivos\PySide6\QtWebEngineProcess.exe
