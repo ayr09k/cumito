@@ -134,12 +134,29 @@ shot("w05_ahora_sonando", 2200)
 js("openSheet()")
 shot("w06_lista", 1000)
 js("closeSheet(); openOptions()")
-shot("w07_opciones", 1100)
+shot("w07_opciones", 2000)
+js("optGo(2)")
+shot("w07b_opciones_girando", 900)
 js("closePanel(); openLyrics()")
 win.push("lyrics", {"found": True, "webpage_url": "https://yt/x", "synced": "\n".join(
     f"[01:{s:05.2f}] {t}" for s, t in [(0, "Hace mucho tiempo le hago caso al corazón"), (2, "Y pasan los días"),
                                         (8, "Ha llegado el tiempo para usar la razón"), (14, "Pero aquí sigo yo")])})
 shot("w08_karaoke", 1500)
+js("closePanel(); openAlbums()")
+win.push("albums", {"albums": [
+    {"id": 1, "name": "Perreo de los viernes", "owner": "Ana", "color": "#F2D16B", "count": 24,
+     "arts": [r["art_url"] for r in recent]},
+    {"id": 2, "name": "Para estudiar", "owner": "Pedro", "color": "#1F2D5C", "count": 41, "arts": []}]})
+shot("w09_discos", 1800)
+js("closePanel(); openPanel('status')")
+win.push("status", {"cpu": 23, "cpu_hist": [20 + (i % 9) * 3 for i in range(90)], "steal": 2,
+                    "steal_hist": [2] * 90, "cores": 2, "mem": {"total": 1e9, "used": 6.1e8},
+                    "disk": {"total": 4.7e10, "used": 9.8e9}, "uptime_vm": 450000, "uptime_bot": 7800,
+                    "bot_rss": 1.6e8, "helpers": {"n": 2, "rss": 1.2e8},
+                    "discord": {"ready": True, "ping": 48, "voice": "General"}, "listeners": 3,
+                    "queue": {"total": 14, "prepared": 5}, "playing": "Ojitos Lindos",
+                    "versions": {"server": "2.1 (2026-11-04)", "yt_dlp": "2026.10.22"}, "time": now, "logs": []})
+shot("w10_estado", 2000)
 js("closePanel()")
 wait(600)
 win.window_command("drag")   # no debe romper nada aunque no haya mouse
