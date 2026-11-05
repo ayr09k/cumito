@@ -88,6 +88,15 @@ class Lanes:
                 self.done["light"] += 1
                 self.last_ms["light"] = round((time.monotonic() - t0) * 1000)
 
+    def warm(self):
+        """Arranca los dos ayudantes de una vez (en una VM chica, crear uno
+        tarda varios segundos: mejor que no le toque a la primera búsqueda)."""
+        for name in self._pools:
+            try:
+                self._pool(name).submit(int)
+            except Exception:
+                pass
+
     def snapshot(self):
         return {
             "urgent": {"busy": self._busy["urgent"], "done": self.done["urgent"], "ms": self.last_ms["urgent"]},

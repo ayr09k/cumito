@@ -256,6 +256,8 @@ class CumitoServer:
 
     async def run(self):
         asyncio.create_task(self.salud.run())
+        from cumito_bot.lanes import LANES
+        LANES.warm()
         await self.relay.start()
         print(f"Relay escuchando en el puerto {RELAY_PORT}. Conectando el bot a Discord...")
         try:
