@@ -38,8 +38,10 @@ def load_fonts(app=None):
         fid = QFontDatabase.addApplicationFont(str(f))
         if fid >= 0:
             fams.update(QFontDatabase.applicationFontFamilies(fid))
-    if "Manrope" in fams:
-        GLASS_FONT_FAMILY = "Manrope"
+    # (las de fontsource se llaman "Manrope ExtraLight" por dentro, aunque traigan todos los pesos)
+    manrope = sorted((f for f in fams if f.startswith("Manrope")), key=len)
+    if manrope:
+        GLASS_FONT_FAMILY = "Manrope" if "Manrope" in manrope else manrope[0]
     if app is not None:
         f = QFont(GLASS_FONT_FAMILY)
         f.setPixelSize(12)

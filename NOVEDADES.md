@@ -1,3 +1,7 @@
+## Cumito 2.2.1
+
+- La letra del diseño (Manrope) ahora también se ve en el modo streamer.
+
 ## Cumito 2.2 · igual al diseño
 
 - **El modo normal ahora es el diseño del lienzo, tal cual:** el vidrio borroso de verdad, los botones que crecen y se aprietan con rebote, la píldora de Buscar que se estira, las pestañas que se deslizan como gota, el fondo que se pasea, el inicio con manchas de color que respiran y Cumito que salta.
