@@ -392,7 +392,13 @@ def _autoprueba():
     app = QApplication(sys.argv)
     from cumito import theme
     fam = theme.load_fonts(app)
-    lines = [f"motor web disponible: {liquid_window.AVAILABLE}", f"letra: {fam}"]
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "assets" / "fonts"
+    from PySide6.QtGui import QFontDatabase
+    lines = [f"motor web disponible: {liquid_window.AVAILABLE}", f"letra: {fam}", f"carpeta: {base}",
+             f"archivos: {[p.name for p in base.glob('*')] if base.exists() else 'NO EXISTE'}"]
+    for f in sorted(base.glob("*.ttf")) if base.exists() else []:
+        fid = QFontDatabase.addApplicationFont(str(f))
+        lines.append(f"  {f.name}: id={fid} familias={QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else '-'}")
     if liquid_window.AVAILABLE:
         class Core:
             cfg, recent_searches, visual, ui_scale = {"display_name": "Prueba"}, [], {}, 1.0
