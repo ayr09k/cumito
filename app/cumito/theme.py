@@ -2,7 +2,7 @@
 paleta vieja arrastrada: este proyecto solo tiene esta pantalla."""
 
 GLASS_WINDOW_W, GLASS_WINDOW_H = 360, 600
-GLASS_WINDOW_RADIUS = 22
+GLASS_WINDOW_RADIUS = 28
 
 GLASS_ACCENT = "#8E6CF2"
 GLASS_ACCENT_SOFT = "rgba(142,108,242,0.35)"
@@ -23,3 +23,26 @@ FLAT_CHROME_BG = "#232330"
 FLAT_PANEL_BG = "#17171F"
 
 GLASS_FONT_FAMILY = "Segoe UI"
+
+
+def load_fonts(app=None):
+    """Manrope (la letra del diseño 2.0) si viene en assets/fonts; si no,
+    Segoe UI. Se llama una vez, antes de armar las ventanas."""
+    global GLASS_FONT_FAMILY
+    import sys
+    from pathlib import Path
+    from PySide6.QtGui import QFont, QFontDatabase
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets" / "fonts"
+    fams = set()
+    for f in sorted(base.glob("*.ttf")) if base.exists() else []:
+        fid = QFontDatabase.addApplicationFont(str(f))
+        if fid >= 0:
+            fams.update(QFontDatabase.applicationFontFamilies(fid))
+    if "Manrope" in fams:
+        GLASS_FONT_FAMILY = "Manrope"
+    if app is not None:
+        f = QFont(GLASS_FONT_FAMILY)
+        f.setPixelSize(12)
+        f.setHintingPreference(QFont.PreferNoHinting)
+        app.setFont(f)
+    return GLASS_FONT_FAMILY

@@ -16,6 +16,8 @@ from PySide6.QtWidgets import QApplication
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "vista_previa")
 OUT.mkdir(parents=True, exist_ok=True)
 app = QApplication(sys.argv)
+from cumito import theme as _theme  # noqa: E402
+_theme.load_fonts(app)
 
 import cumito.glass_screen as gs  # noqa: E402
 from cumito.glass_screen import GlassScreen  # noqa: E402

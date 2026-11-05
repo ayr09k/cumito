@@ -55,7 +55,9 @@ jobs:
 
       - name: Instalar herramientas
         if: steps.ver.outputs.existe == '0'
-        run: python -m pip install --disable-pip-version-check -q -r app/requirements.txt "pyinstaller>=6.0"
+        run: |
+          python -m pip install --disable-pip-version-check -q -r app/requirements.txt "pyinstaller>=6.0"
+          python app/herramientas/bajar_fuentes.py
 
       - name: Armar la app
         if: steps.ver.outputs.existe == '0'

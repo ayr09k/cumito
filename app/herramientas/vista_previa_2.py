@@ -16,6 +16,8 @@ from PySide6.QtWidgets import QApplication
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "vista_previa_2")
 OUT.mkdir(parents=True, exist_ok=True)
 app = QApplication(sys.argv)
+from cumito import theme as _theme  # noqa: E402
+_theme.load_fonts(app)
 
 import cumito.glass_screen as gs  # noqa: E402
 
@@ -84,10 +86,56 @@ state = {
     "sleep": {"at": now + 29 * 60, "eot": False}, "can_prev": True, "albums_rev": 3,
 }
 w.show()
+# ---- inicio (no suena nada) ----
+home = {**state, "now_playing": None, "queue": [], "members": ["Ana", "Pedro", "Juan"],
+        "recent": [{"title": t, "uploader": a, "webpage_url": f"https://yt/r{i}", "art_url": f"https://img/{i + 2}"}
+                   for i, (t, a) in enumerate([("Bohemian Rhapsody", "Queen"), ("Highest in the Room", "Travis Scott"),
+                                               ("La Bachata", "Manuel Turizo"), ("Gasolina", "Daddy Yankee")])]}
+w.set_state(home)
+w.set_albums([{"id": 1, "name": "Perreo de los viernes", "owner": "Ana", "color": "#F2D16B", "cover": None,
+               "count": 24, "arts": []},
+              {"id": 2, "name": "Para estudiar", "owner": "Pedro", "color": "#1F2D5C", "cover": None, "count": 41,
+               "arts": []},
+              {"id": 3, "name": "Para el carro", "owner": "Juan", "color": "#E0457B", "cover": "abc", "count": 18,
+               "arts": []}])
+w.set_activity_list([{"id": 1, "ts": now - 300, "who": "Ana", "kind": "add", "text": "agregó 1 canción",
+                      "title": "La Bachata"},
+                     {"id": 2, "ts": now - 100, "who": "Pedro", "kind": "album_new", "text": "creó el disco «Para estudiar»"}])
+wait(700)
+shot(w, "19_inicio")
+w.home_scroll.verticalScrollBar().setValue(10000)
+wait(200)
+shot(w, "19b_inicio_abajo")
+w.home_scroll.verticalScrollBar().setValue(0)
+w._open_search()
+wait(260)
+shot(w, "19c_buscar_estirandose")
+wait(700)
+shot(w, "19d_buscar_desde_inicio")
+w.recent_searches = ["bad bunny", "travis scott", "la bachata", "queen"]
+w._refresh_search_home()
+wait(300)
+shot(w, "19e_buscar_recientes")
+w._set_search_kind("all")
+w.search_tabs.set_current("all")
+wait(200)
+shot(w, "19f_pestana_moviendose")
+wait(600)
+w._set_search_kind("music")
+w.search_tabs.set_current("music")
+w._close_search()
+wait(800)
+shot(w, "19g_buscar_cerrado")
+
 w.set_state(state)
 w._set_art_background(w.art_cache.get("https://img/1"))
 wait(500)
 shot(w, "20_principal_2_0")
+w._open_search()
+wait(900)
+shot(w, "20c_buscar_desde_arriba")
+w._close_search()
+wait(800)
 log.append(f"botones: shuffle={w.btn_shuffle.isVisible()} repeat={w.btn_repeat.isVisible()} "
            f"heart={w.btn_heart.isVisible()} lyrics={w.btn_lyrics.isVisible()} react={w.btn_react.isVisible()} "
            f"discos_pill={w.discos_pill.isVisible()} prev_on={w.btn_prev.isEnabled()} seek={w.progress.seekable}")

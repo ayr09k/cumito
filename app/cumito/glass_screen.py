@@ -30,7 +30,7 @@ import uuid
 
 from PySide6.QtCore import (
     QAbstractAnimation, QEasingCurve, QEvent, QParallelAnimationGroup, QPoint, QPropertyAnimation,
-    QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
+    QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
 )
 from PySide6.QtGui import QColor, QCursor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
@@ -52,6 +52,10 @@ from .albums import AlbumPicker, AlbumsView, Toast, cover_key, sleeve_pixmap
 from .lyrics_view import LyricsView
 from .reactions import ReactionBar, float_reaction
 from .wrapped import WrappedView
+from .liquid import (
+    ActivityLine, AlbumCard, Burst, Chip, CoverThumb, FlowBox, Mascot, Members, RecentCard, SearchPill, SegTabs,
+    TitleEq,
+)
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -243,17 +247,33 @@ class _IconButton(QPushButton):
         self.setIcon(icons.icon(icon_name, self._icon_color, self._icon_size))
         self.setIconSize(QSize(self._icon_size, self._icon_size))
 
+    def enterEvent(self, ev):
+        # "zoom" chiquito al pasar el mouse (el ícono crece 2 px)
+        if self.isEnabled():
+            self.setIconSize(QSize(self._icon_size + 2, self._icon_size + 2))
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):
+        self.setIconSize(QSize(self._icon_size, self._icon_size))
+        super().leaveEvent(ev)
+
     def apply_glass(self, glass: bool):
-        bg = theme.GLASS_CHROME_BG if glass else theme.FLAT_CHROME_BG
-        hover = theme.GLASS_CHROME_BG_HOVER if glass else "rgba(255,255,255,0.2)"
         color = theme.GLASS_DANGER if self.danger else theme.GLASS_TEXT
-        border = theme.GLASS_BORDER if glass else "rgba(255,255,255,0.14)"
+        if glass:
+            bg = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.20),"
+                  " stop:1 rgba(255,255,255,0.07))")
+            hover = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.30),"
+                     " stop:1 rgba(255,255,255,0.12))")
+            border = "1px solid rgba(255,255,255,0.22); border-top: 1px solid rgba(255,255,255,0.45)"
+        else:
+            bg, hover, border = theme.FLAT_CHROME_BG, "rgba(255,255,255,0.2)", "1px solid rgba(255,255,255,0.14)"
         self.setStyleSheet(f"""
             QPushButton {{
-                background: {bg}; color: {color}; border: 1px solid {border};
+                background: {bg}; color: {color}; border: {border};
                 border-radius: {self._radius}px; font-size: 12px; font-weight: 600;
             }}
             QPushButton:hover {{ background: {hover}; }}
+            QPushButton:pressed {{ background: rgba(255,255,255,0.10); }}
         """)
 
 
@@ -262,21 +282,29 @@ class _Pill(QPushButton):
         super().__init__(text, parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setFlat(True)
-        self.setFixedHeight(32)
-        self.setFont(QFont(theme.GLASS_FONT_FAMILY, 10, QFont.DemiBold))
+        self.setFixedHeight(34)
+        f = QFont(theme.GLASS_FONT_FAMILY)
+        f.setPixelSize(13)
+        f.setWeight(QFont.Bold)
+        self.setFont(f)
         self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         if icon_name:
             self.setIcon(icons.icon(icon_name, theme.GLASS_TEXT, 15))
             self.setIconSize(QSize(15, 15))
 
     def apply_glass(self, glass: bool):
-        bg = theme.GLASS_CHROME_BG if glass else theme.FLAT_CHROME_BG
-        hover = theme.GLASS_CHROME_BG_HOVER if glass else "rgba(255,255,255,0.2)"
-        border = theme.GLASS_BORDER if glass else "rgba(255,255,255,0.14)"
+        if glass:
+            bg = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.20),"
+                  " stop:1 rgba(255,255,255,0.08))")
+            hover = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.30),"
+                     " stop:1 rgba(255,255,255,0.13))")
+            border = "1px solid rgba(255,255,255,0.20); border-top: 1px solid rgba(255,255,255,0.42)"
+        else:
+            bg, hover, border = theme.FLAT_CHROME_BG, "rgba(255,255,255,0.2)", "1px solid rgba(255,255,255,0.14)"
         self.setStyleSheet(f"""
             QPushButton {{
-                background: {bg}; color: {theme.GLASS_TEXT}; border: 1px solid {border};
-                border-radius: 16px; padding: 4px 16px;
+                background: {bg}; color: {theme.GLASS_TEXT}; border: {border};
+                border-radius: 17px; padding: 4px 16px; font-weight: 700;
             }}
             QPushButton:hover {{ background: {hover}; }}
         """)
@@ -321,7 +349,7 @@ class _ProgressBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(14)
+        self.setFixedHeight(18)
         self._frac = 0.0
         self._drag = None
         self._hover = False
@@ -379,7 +407,7 @@ class _ProgressBar(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setPen(Qt.NoPen)
         active = self.seekable and (self._hover or self._drag is not None)
-        th = 6 if active else 4
+        th = 9 if active else 5
         y = (self.height() - th) / 2
         p.setBrush(QColor(255, 255, 255, 55))
         p.drawRoundedRect(QRectF(0, y, self.width(), th), th / 2, th / 2)
@@ -389,9 +417,11 @@ class _ProgressBar(QWidget):
             p.setBrush(QColor("#ffffff"))
             p.drawRoundedRect(QRectF(0, y, w, th), th / 2, th / 2)
         if active:
-            x = self.width() * f
+            x = max(7.5, min(self.width() - 7.5, self.width() * f))
+            p.setBrush(QColor(0, 0, 0, 70))
+            p.drawEllipse(QRectF(x - 7.5, self.height() / 2 - 6.5, 15, 15))
             p.setBrush(QColor("#ffffff"))
-            p.drawEllipse(QRectF(x - 6, self.height() / 2 - 6, 12, 12))
+            p.drawEllipse(QRectF(x - 7.5, self.height() / 2 - 7.5, 15, 15))
 
 
 class _Equalizer(QWidget):
@@ -1105,9 +1135,10 @@ class _GlassPanel(QWidget):
     encima un velo oscuro para que todo se lea. Con el switch de glass
     apagado, es un fondo sólido."""
 
-    def __init__(self, screen, top_radius=0, tint_alpha=150, parent=None, stars=False):
+    def __init__(self, screen, top_radius=0, tint_alpha=150, parent=None, stars=False, transparent=False):
         super().__init__(parent or screen)
         self._stars = stars
+        self._transparent = transparent
         self._screen = screen
         self._radius = top_radius
         self._tint_alpha = tint_alpha
@@ -1134,6 +1165,8 @@ class _GlassPanel(QWidget):
         return path
 
     def paintEvent(self, ev):
+        if self._transparent:
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         path = self._shape()
@@ -1338,7 +1371,7 @@ class GlassScreen(QWidget):
         self.titlebar = QWidget(self)
         self.titlebar.setGeometry(0, 0, W, 92)
         tlay = QVBoxLayout(self.titlebar)
-        tlay.setContentsMargins(14, 14, 14, 0)
+        tlay.setContentsMargins(16, 14, 16, 0)
         tlay.setSpacing(10)
 
         row = QHBoxLayout()
@@ -1358,7 +1391,17 @@ class GlassScreen(QWidget):
         title_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         tgrid = QGridLayout(title_area)
         tgrid.setContentsMargins(0, 0, 4, 0)
-        tgrid.addWidget(name, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        name.setStyleSheet("color:#fff; font-size:13.5px; font-weight:800; background:transparent;")
+        name_box = QWidget()
+        name_box.setStyleSheet("background:transparent;")
+        nbl = QHBoxLayout(name_box)
+        nbl.setContentsMargins(0, 0, 0, 0)
+        nbl.setSpacing(8)
+        nbl.addWidget(name)
+        self.title_eq = TitleEq()
+        nbl.addWidget(self.title_eq, 0, Qt.AlignVCenter)
+        nbl.addStretch()
+        tgrid.addWidget(name_box, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
         self.ticker = Ticker(name)
         tgrid.addWidget(self.ticker, 0, 0)
         left.addWidget(title_area, 1)
@@ -1366,17 +1409,17 @@ class GlassScreen(QWidget):
 
         # todo lo demás (apagar, vidrio, servidor, nombre, actividad...)
         # vive en la rueda de Opciones
-        self.btn_options = _IconButton("menu")
+        self.btn_options = _IconButton("menu", size=28)
         self.btn_options.setToolTip("Opciones")
         self.btn_options.clicked.connect(self._open_settings)
         row.addWidget(self.btn_options)
 
-        self.btn_minimize = _IconButton("minimize")
+        self.btn_minimize = _IconButton("minimize", size=28)
         self.btn_minimize.setToolTip("Minimizar")
         self.btn_minimize.clicked.connect(self.showMinimized)
         row.addWidget(self.btn_minimize)
 
-        self.btn_close = _IconButton("close", danger=True)
+        self.btn_close = _IconButton("close", danger=True, size=28)
         self.btn_close.clicked.connect(self.close)
         row.addWidget(self.btn_close)
 
@@ -1420,13 +1463,12 @@ class GlassScreen(QWidget):
 
         mini_row = QHBoxLayout()
         mini_row.setSpacing(11)
-        self.mini_thumb = QLabel()
-        self.mini_thumb.setFixedSize(42, 42)
+        self.mini_thumb = CoverThumb(46, 12)
         mini_row.addWidget(self.mini_thumb)
         mini_info = QVBoxLayout()
         mini_info.setSpacing(0)
         self.now_title = _ElidedLabel("Nada sonando")
-        self.now_title.setStyleSheet("color:#fff; font-size:16px; font-weight:800; background:transparent;")
+        self.now_title.setStyleSheet("color:#fff; font-size:17px; font-weight:800; background:transparent;")
         self.now_artist = _ElidedLabel("Agrega algo con el buscador")
         self.now_artist.setStyleSheet("color: rgba(255,255,255,0.62); font-size:12.5px; background:transparent;")
         mini_info.addWidget(self.now_title)
@@ -1469,15 +1511,15 @@ class GlassScreen(QWidget):
         self.btn_shuffle.clicked.connect(self._on_shuffle)
         self.btn_shuffle.hide()
         transport.addWidget(self.btn_shuffle)
-        self.btn_prev = _IconButton("prev", size=36, icon_size=20, icon_color="#FFFFFF")
+        self.btn_prev = _IconButton("prev", size=44, icon_size=22, icon_color="#FFFFFF")
         self.btn_prev.setEnabled(False)
         self.btn_prev.setToolTip("Sin historial hacia atrás por ahora")
         self.btn_prev.clicked.connect(lambda: self.send_command("prev"))
         transport.addWidget(self.btn_prev)
-        self.btn_play = _IconButton("play", size=48, icon_size=20, icon_color="#FFFFFF")
+        self.btn_play = _IconButton("play", size=54, icon_size=22, icon_color="#FFFFFF")
         self.btn_play.clicked.connect(self._on_play_pause)
         transport.addWidget(self.btn_play)
-        self.btn_next = _IconButton("next", size=36, icon_size=20, icon_color="#FFFFFF")
+        self.btn_next = _IconButton("next", size=44, icon_size=22, icon_color="#FFFFFF")
         self.btn_next.clicked.connect(lambda: self.send_command("skip"))
         transport.addWidget(self.btn_next)
         self.btn_repeat = _IconButton("repeat", size=32, icon_size=17, icon_color="#FFFFFF")
@@ -1494,19 +1536,22 @@ class GlassScreen(QWidget):
         # brillo arriba, nada de blanco sólido.
         for b in (self.btn_prev, self.btn_next, self.btn_shuffle, self.btn_repeat, self.btn_react, self.btn_heart,
                   self.btn_lyrics):
+            r = b.width() // 2
             b.setStyleSheet(
-                "QPushButton { background: transparent; border:none; border-radius: 18px; }"
+                f"QPushButton {{ background: transparent; border:none; border-radius: {r}px; }}"
                 "QPushButton:hover { background: rgba(255,255,255,0.10); }"
                 "QPushButton:pressed { background: rgba(255,255,255,0.05); }"
+                "QPushButton:disabled { background: transparent; }"
             )
+        # play: una gota de vidrio (brillo arriba a la izquierda, borde de luz)
         self.btn_play.setStyleSheet(
-            "QPushButton { border-radius: 24px;"
-            " background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.30),"
-            " stop:0.55 rgba(255,255,255,0.13), stop:1 rgba(255,255,255,0.20));"
-            " border: 1px solid rgba(255,255,255,0.42); border-top: 1px solid rgba(255,255,255,0.80); }"
-            "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.40),"
-            " stop:0.55 rgba(255,255,255,0.20), stop:1 rgba(255,255,255,0.27)); }"
-            "QPushButton:pressed { background: rgba(255,255,255,0.12); }"
+            "QPushButton { border-radius: 27px;"
+            " background: qradialgradient(cx:0.32, cy:0.24, radius:0.95, fx:0.32, fy:0.24,"
+            " stop:0 rgba(255,255,255,0.60), stop:0.58 rgba(255,255,255,0.16), stop:1 rgba(255,255,255,0.10));"
+            " border: 1px solid rgba(255,255,255,0.45); border-top: 1px solid rgba(255,255,255,0.85); }"
+            "QPushButton:hover { background: qradialgradient(cx:0.32, cy:0.24, radius:0.95, fx:0.32, fy:0.24,"
+            " stop:0 rgba(255,255,255,0.72), stop:0.58 rgba(255,255,255,0.24), stop:1 rgba(255,255,255,0.16)); }"
+            "QPushButton:pressed { background: rgba(255,255,255,0.14); }"
         )
 
         # ---- modo "solo portada" (después de IDLE_S sin tocar nada) ----
@@ -1541,74 +1586,135 @@ class GlassScreen(QWidget):
         self.idle_caption.hide()
         self._idle_fx = {}   # widget -> efecto de opacidad (solo durante el modo)
 
-        # ---- estado vacío: "¿Qué escucharemos hoy?" ----
-        # Se ve cuando no suena nada: Cumito feliz, lo último que sonó en
-        # el servidor (clic = ponerla otra vez) y una barra de búsqueda.
+        # ---- inicio (no suena nada): "¿Qué escucharemos hoy?" ----
+        # Saludo, quién está conectado, Cumito (si lo tocas salta), lo último
+        # que sonó, los Discos del grupo y lo que pasó; abajo, la barra para
+        # buscar (que al tocarla se estira hasta arriba).
         self.empty_view = QWidget(self)
-        self.empty_view.setGeometry(0, 52, W, H - 52)
-        elay = QVBoxLayout(self.empty_view)
-        elay.setContentsMargins(22, 6, 22, 20)
+        self.empty_view.setGeometry(0, 50, W, H - 50)
+        ev_lay = QVBoxLayout(self.empty_view)
+        ev_lay.setContentsMargins(0, 0, 0, 0)
+        home = QWidget()
+        home.setStyleSheet("background: transparent;")
+        elay = QVBoxLayout(home)
+        elay.setContentsMargins(18, 0, 14, 96)
         elay.setSpacing(0)
-
-        self.empty_mascot = QLabel()
-        # la imagen completa (es vertical), sin máscara ni recorte
-        self.empty_mascot.setFixedSize(122, 160)
-        self.empty_mascot.setAlignment(Qt.AlignCenter)
-        self.empty_mascot.setStyleSheet("background:transparent;")
-        mascot = icons.artwork("cumito_feliz", 122, 160)
-        if mascot is not None:
-            self.empty_mascot.setPixmap(mascot)
-        mascot_row = QHBoxLayout()
-        mascot_row.addStretch()
-        mascot_row.addWidget(self.empty_mascot)
-        mascot_row.addStretch()
-        elay.addLayout(mascot_row)
-        elay.addSpacing(8)
-
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        hello = QVBoxLayout()
+        hello.setSpacing(0)
+        self.home_greeting = QLabel("")
+        self.home_greeting.setStyleSheet("color:#C9B4F8; font-size:12px; font-weight:700; background:transparent;")
+        hello.addWidget(self.home_greeting)
+        hello.addSpacing(4)
         self.empty_title = QLabel("¿Qué escucharemos hoy?")
-        self.empty_title.setAlignment(Qt.AlignCenter)
-        self.empty_title.setStyleSheet("color:#fff; font-size:19px; font-weight:800; background:transparent;")
-        elay.addWidget(self.empty_title)
+        self.empty_title.setWordWrap(True)
+        self.empty_title.setStyleSheet("color:#fff; font-size:27px; font-weight:800; background:transparent;")
+        hello.addWidget(self.empty_title)
         self.empty_subtitle = QLabel("")
-        self.empty_subtitle.setAlignment(Qt.AlignCenter)
         self.empty_subtitle.setWordWrap(True)
         self.empty_subtitle.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE}; font-size:11.5px; background:transparent;")
-        elay.addWidget(self.empty_subtitle)
-        elay.addSpacing(16)
+        self.empty_subtitle.hide()
+        hello.addWidget(self.empty_subtitle)
+        hello.addSpacing(12)
+        self.home_members = Members()
+        hello.addWidget(self.home_members)
+        hello.addStretch()
+        top.addLayout(hello, 1)
+        self.empty_mascot = Mascot(icons.artwork("cumito_feliz", 112, 140))
+        top.addWidget(self.empty_mascot, 0, Qt.AlignBottom)
+        elay.addLayout(top)
+        elay.addSpacing(20)
 
-        self.recent_header = QLabel("LO ÚLTIMO QUE SONÓ")
-        self.recent_header.setStyleSheet(
-            f"color:{theme.GLASS_TEXT_MUTE}; font-size:10px; font-weight:700; letter-spacing:1px; background:transparent;"
-        )
+        def _section(text, link=None, on_link=None):
+            row = QHBoxLayout()
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: rgba(244,242,250,0.6); font-size:10.5px; font-weight:800;"
+                              " letter-spacing:1.3px; background:transparent;")
+            row.addWidget(lbl)
+            row.addStretch()
+            btn = None
+            if link:
+                btn = QPushButton(link)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setStyleSheet("QPushButton { color:#C9B4F8; background:transparent; border:none;"
+                                  " font-size:11px; font-weight:700; } QPushButton:hover { color:#FFFFFF; }")
+                btn.clicked.connect(on_link)
+                row.addWidget(btn)
+            box = QWidget()
+            box.setStyleSheet("background:transparent;")
+            box.setLayout(row)
+            row.setContentsMargins(0, 0, 4, 0)
+            return box, btn
+
+        self.recent_header, _ = _section("LO ÚLTIMO QUE SONÓ")
         elay.addWidget(self.recent_header)
-        elay.addSpacing(6)
-
+        elay.addSpacing(10)
         self.recent_list_widget = QWidget()
-        self.recent_list_layout = QVBoxLayout(self.recent_list_widget)
-        self.recent_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_list_layout.setSpacing(2)
+        self.recent_list_widget.setStyleSheet("background:transparent;")
+        self.recent_list_layout = QHBoxLayout(self.recent_list_widget)
+        self.recent_list_layout.setContentsMargins(0, 0, 0, 4)
+        self.recent_list_layout.setSpacing(12)
         self.recent_list_layout.addStretch()
         self.recent_scroll = _bare_scroll(self.recent_list_widget)
-        elay.addWidget(self.recent_scroll, 1)
-
-        self.recent_empty_label = QLabel("Todavía no ha sonado nada.\n¡Pon la primera!")
-        self.recent_empty_label.setAlignment(Qt.AlignCenter)
+        self.recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.recent_scroll.setWidgetResizable(True)
+        self.recent_scroll.setFixedHeight(RecentCard.S + 46)
+        self.recent_scroll.viewport().installEventFilter(self)   # la rueda del mouse lo mueve de lado
+        elay.addWidget(self.recent_scroll)
+        self.recent_empty_label = QLabel("Todavía no ha sonado nada. ¡Pon la primera!")
         self.recent_empty_label.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:11.5px; background:transparent;")
-        elay.addWidget(self.recent_empty_label, 1)
-        elay.addSpacing(12)
+        elay.addWidget(self.recent_empty_label)
 
-        self.empty_search = QPushButton("   Buscar canción o pegar link…")
-        self.empty_search.setCursor(Qt.PointingHandCursor)
-        self.empty_search.setFixedHeight(44)
-        self.empty_search.setIcon(icons.icon("search", "#BDBAC6", 16))
-        self.empty_search.setIconSize(QSize(16, 16))
-        self.empty_search.setStyleSheet(
-            f"QPushButton {{ text-align:left; padding-left:16px; background: rgba(255,255,255,0.10);"
-            f" border:1px solid {theme.GLASS_BORDER}; border-radius:22px; color:#BDBAC6; font-size:12.5px; }}"
-            "QPushButton:hover { background: rgba(255,255,255,0.16); }"
-        )
-        self.empty_search.clicked.connect(self._open_search)
-        elay.addWidget(self.empty_search)
+        elay.addSpacing(16)
+        self.home_albums_header, _ = _section("DISCOS DEL GRUPO", "Crear disco", self._home_new_album)
+        elay.addWidget(self.home_albums_header)
+        elay.addSpacing(10)
+        self.home_albums_grid = QGridLayout()
+        self.home_albums_grid.setHorizontalSpacing(10)
+        self.home_albums_grid.setVerticalSpacing(10)
+        self.home_albums_grid.setContentsMargins(0, 0, 4, 0)
+        elay.addLayout(self.home_albums_grid)
+        self.home_albums_more = QPushButton("Ver todos los discos")
+        self.home_albums_more.setCursor(Qt.PointingHandCursor)
+        self.home_albums_more.setStyleSheet("QPushButton { color:#C9B4F8; background:transparent; border:none;"
+                                            " font-size:11px; font-weight:700; padding:6px 0; text-align:left; }"
+                                            " QPushButton:hover { color:#FFFFFF; }")
+        self.home_albums_more.clicked.connect(lambda: self.open_albums())
+        elay.addWidget(self.home_albums_more)
+
+        elay.addSpacing(10)
+        self.home_act_header, _ = _section("ACTIVIDAD", "Ver todo", lambda: self.open_activity())
+        elay.addWidget(self.home_act_header)
+        elay.addSpacing(6)
+        self.home_act_box = QVBoxLayout()
+        self.home_act_box.setSpacing(6)
+        elay.addLayout(self.home_act_box)
+        elay.addStretch()
+        self.home_scroll = _bare_scroll(home)
+        ev_lay.addWidget(self.home_scroll)
+        self._home_acts = []          # lo último del registro (para el inicio)
+        self._home_sig = None
+
+        # abajo: un degradado y la barra de buscar
+        self.home_foot = QLabel(self.empty_view)
+        self.home_foot.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.home_foot.setGeometry(0, self.empty_view.height() - 110, W, 110)
+        fpix = QPixmap(W, 110)
+        fpix.fill(Qt.transparent)
+        fp = QPainter(fpix)
+        fg = QLinearGradient(0, 0, 0, 110)
+        fg.setColorAt(0.0, QColor(11, 10, 16, 0))
+        fg.setColorAt(0.6, QColor(11, 10, 16, 235))
+        fg.setColorAt(1.0, QColor(11, 10, 16, 235))
+        fp.fillRect(fpix.rect(), fg)
+        fp.end()
+        self.home_foot.setPixmap(fpix)
+        self.empty_search = SearchPill(QLineEdit(), self.empty_view)
+        self.empty_search.word = "Buscar canción o pegar un link"
+        self.empty_search.setGeometry(14, self.empty_view.height() - 18 - 58, W - 28, 58)
+        self.empty_search.opened.connect(self._open_search)
 
         # ---- bandeja de playlist ----
         self.playlist_sheet = _GlassPanel(self, top_radius=20)
@@ -1662,57 +1768,36 @@ class GlassScreen(QWidget):
         self._sheet_anim.setDuration(320)
         self._sheet_anim.setEasingCurve(QEasingCurve.OutCubic)
 
-        # ---- buscador: hoja de vidrio que sube desde abajo ----
-        # (deja visible la fila de arriba: cerrar, minimizar, etc.)
-        self.search_view = _GlassPanel(self, top_radius=22, tint_alpha=165, stars=True)
-        self.search_view.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        # ---- buscador (2.0): todo se oscurece con estrellitas, la píldora de
+        # "Buscar" se estira hasta arriba y abajo aparecen las pestañas, lo
+        # reciente y los resultados ----
+        self.search_dim = _GlassPanel(self, top_radius=0, tint_alpha=200, stars=True)
+        self.search_dim.setGeometry(0, 0, W, H)
+        self.search_dim.hide()
+        self.search_dim.installEventFilter(self)       # tocar lo oscuro = cerrar
+        self.search_view = _GlassPanel(self, top_radius=0, transparent=True)
+        self.search_view.setGeometry(0, 70, W, H - 70)
         self.search_view.hide()
         qlay = QVBoxLayout(self.search_view)
-        qlay.setContentsMargins(14, 8, 14, 0)
+        qlay.setContentsMargins(16, 6, 16, 0)
         qlay.setSpacing(10)
-        qlay.addLayout(self._handle_row())
-
-        shead = QHBoxLayout()
-        shead.setSpacing(8)
-        self.btn_back = _IconButton("back", size=30)
-        self.btn_back.clicked.connect(self._close_search)
-        shead.addWidget(self.btn_back)
-        self._chrome_widgets.append(self.btn_back)
-        # la barra "líquida": vidrio con brillo arriba y borde de luz; al
-        # abrir el buscador se estira con un pequeño rebote
+        self.btn_back = _IconButton("back", size=30)   # (ya no se ve: la X de la píldora cierra)
+        self.btn_back.hide()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Canción, artista o link de playlist")
-        self.search_input.setFixedHeight(38)
-        self.search_input.addAction(icons.icon("search", "#CFCBD8", 16), QLineEdit.LeadingPosition)
-        self.search_input.setStyleSheet(
-            "QLineEdit { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-            " stop:0 rgba(255,255,255,0.22), stop:0.55 rgba(255,255,255,0.10), stop:1 rgba(255,255,255,0.06));"
-            " border: 1px solid rgba(255,255,255,0.32); border-radius: 19px; padding: 0 12px 0 4px;"
-            f" color: {theme.GLASS_TEXT}; font-size: 12.5px; }}"
-            "QLineEdit:focus { border: 1px solid rgba(142,108,242,0.95); }"
-        )
+        self.search_input.setPlaceholderText("Canción, artista o link")
         self.search_input.returnPressed.connect(self._submit_search)
         self.search_input.textChanged.connect(self._on_search_text_changed)
-        shead.addWidget(self.search_input, 1)
-        qlay.addLayout(shead)
+        self.search_morph = SearchPill(self.search_input, self)
+        self.search_morph.hide()
+        self.search_morph.close_clicked.connect(self._close_search)
+        self._search_from = None         # de qué botón salió la píldora (para volver ahí)
 
         # pestañas: "Música" (como YouTube Music: versiones de audio oficiales)
         # y "Todo" (YouTube normal: videos, en vivo, covers...)
         self._search_kind = "music"
-        tabs = QHBoxLayout()
-        tabs.setSpacing(8)
-        tabs.setContentsMargins(2, 2, 0, 2)
-        self.search_tabs = {}
-        for kind, text in (("music", "Música"), ("all", "Todo")):
-            b = QPushButton(text)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFixedHeight(30)
-            b.clicked.connect(lambda _=False, k=kind: self._set_search_kind(k))
-            self.search_tabs[kind] = b
-            tabs.addWidget(b)
-        tabs.addStretch()
-        qlay.addLayout(tabs)
-        self._style_search_tabs()
+        self.search_tabs = SegTabs([("music", "Música", 84), ("all", "Todo", 70)])
+        self.search_tabs.changed.connect(self._set_search_kind)
+        qlay.addWidget(self.search_tabs)
 
         # 1) antes de buscar: búsquedas recientes + lo último que sonó
         self.search_home_widget = QWidget()
@@ -2186,7 +2271,7 @@ class GlassScreen(QWidget):
         np = self.state.get("now_playing")
         if np and np.get("art_url") == url:
             self._set_art_background(pixmap)
-            self.mini_thumb.setPixmap(_rounded(_cover_pixmap(pixmap, 42, 42), 10))
+            self.mini_thumb.set_pixmap(pixmap)
             self.mp_thumb.setPixmap(_rounded(_cover_pixmap(pixmap, 32, 32), 9))
         self._refresh_sheet_list()
         self._refresh_recent()
@@ -2235,6 +2320,12 @@ class GlassScreen(QWidget):
         self._on_activity(state.get("activity_last"))
         self._sync_mini()
         self._apply_features()
+        if "albums" in self._features() and not getattr(self, "_home_asked", False):
+            self._home_asked = True
+            self.send_command("album_list")
+            self.send_command("activity_list")
+        if not self.state.get("connected", True):
+            self._home_asked = False
         self._on_reaction(state.get("reaction"))
         rev = state.get("albums_rev")
         if rev is not None and rev != self._albums_rev:
@@ -2338,12 +2429,13 @@ class GlassScreen(QWidget):
     def _leave_panel(self):
         """Antes de abrir un panel: esconde el que estaba (sin animación)."""
         mode = self._panel_mode
-        if mode and mode in self._panels():
+        if mode == "search":
+            self._panel_mode = None
+            self._search_teardown(animate=False)
+        elif mode and mode in self._panels():
             self._panels()[mode].hide()
         if mode == "status":
             self._status_timer.stop()
-        if mode == "search":
-            self.mini_player.hide()
         self.reaction_bar.hide()
         self._close_sheet()
 
@@ -2427,6 +2519,7 @@ class GlassScreen(QWidget):
 
     def set_albums(self, albums):
         self._albums_cache = list(albums or [])
+        self._refresh_home()
         self.albums_view.set_albums(self._albums_cache)
         if self.album_picker.isVisible():
             self._open_picker(refresh=False)
@@ -2438,12 +2531,14 @@ class GlassScreen(QWidget):
     def set_album_cover(self, h, img):
         if h and img is not None and not img.isNull():
             self.art_cache.put(cover_key(h), img)
+            self._refresh_home()
 
     def on_album_added(self, data):
         n = data.get("added") or 0
         alb = next((a for a in self._albums_cache if a.get("id") == data.get("id")), None)
         name = (alb or {}).get("name") or "el disco"
         if n:
+            Burst(self, self.btn_heart.mapTo(self, self.btn_heart.rect().center()))
             self.toast.show_text(f"Guardada en «{name}» 💜")
             self.btn_heart._icon_color = "#FF6B9A"
             self.btn_heart.set_icon("heart_fill")
@@ -2499,6 +2594,8 @@ class GlassScreen(QWidget):
         first = self._last_act is None
         new_id = first or a.get("id") != self._last_act[0]
         self._last_act = key
+        self._home_acts = [x for x in self._home_acts if x.get("id") != a.get("id")] + [a]
+        self._home_acts = self._home_acts[-6:]
         if self._activity_loaded:
             self.activity_feed.add_or_update(a)
             if self._panel_mode == "activity":
@@ -2506,6 +2603,7 @@ class GlassScreen(QWidget):
         # al conectarse llega la última que hubo: solo se anuncia si es reciente
         if new_id and (not first or time.time() - float(a.get("ts") or 0) < 15):
             self.ticker.show_activity(a)
+        self._refresh_home()
 
     # ---- lo peligroso se confirma manteniendo presionado ----
     def _ask_clear_queue(self):
@@ -2529,7 +2627,7 @@ class GlassScreen(QWidget):
         )
 
     def open_status(self):
-        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+        if self._panel_mode in ("lyrics", "albums", "wrapped", "search"):
             self._leave_panel()
         for mode, w in (("search", self.search_view), ("settings", self.settings_view),
                         ("activity", self.activity_view)):
@@ -2573,7 +2671,7 @@ class GlassScreen(QWidget):
         self._after_panel_closed()
 
     def open_activity(self):
-        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+        if self._panel_mode in ("lyrics", "albums", "wrapped", "search"):
             self._leave_panel()
         if self._panel_mode == "status":
             self._status_timer.stop()
@@ -2594,6 +2692,9 @@ class GlassScreen(QWidget):
         QTimer.singleShot(420, self._activity_to_bottom)
 
     def set_activity_list(self, entries):
+        self._home_acts = [e for e in (entries or []) if isinstance(e, dict)][-6:]
+        self._home_sig = None
+        self._refresh_home()
         self._activity_loaded = True
         self.activity_spinner.hide()
         self.activity_feed.set_entries(entries or [])
@@ -2620,6 +2721,13 @@ class GlassScreen(QWidget):
             self.empty_title.setText("Buscando a Cumito…")
             self.empty_subtitle.setText("No se pudo conectar con el servidor. Reintentando solo.")
             self.empty_subtitle.show()
+        self.recent_header.setVisible(connected)
+        if not connected:
+            self.recent_scroll.hide()
+            self.recent_empty_label.hide()
+        else:
+            self._recent_sig = None
+            self._refresh_recent()
 
         if empty == self._empty_mode:
             return
@@ -2665,28 +2773,74 @@ class GlassScreen(QWidget):
     def _refresh_recent(self, force=False):
         recent = self.state.get("recent") or []
         sig = tuple((r.get("webpage_url"), bool(self.art_cache.get(r.get("art_url")))) for r in recent)
-        if sig == self._recent_sig and not force:
+        if sig != self._recent_sig or force:
+            self._recent_sig = sig
+            while self.recent_list_layout.count() > 1:
+                item = self.recent_list_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+            for r in recent:
+                self.art_cache.request(r.get("art_url"))
+                card = RecentCard(r.get("title") or "Sin título", r.get("uploader") or "",
+                                  self.art_cache.get(r.get("art_url")))
+                card.clicked.connect(lambda url=r.get("webpage_url"): url and self.send_command("play", query=url))
+                self.recent_list_layout.insertWidget(self.recent_list_layout.count() - 1, card)
+            has_recent = bool(recent)
+            self.recent_scroll.setVisible(has_recent)
+            self.recent_empty_label.setVisible(not has_recent)
+        self._refresh_home()
+
+    def _greeting(self):
+        h = time.localtime().tm_hour
+        part = "Buenos días" if 5 <= h < 12 else ("Buenas tardes" if 12 <= h < 19 else "Buenas noches")
+        me = self.my_name()
+        return f"{part}, {me}" if me else part
+
+    def _refresh_home(self):
+        connected = self.state.get("connected", True)
+        self.home_greeting.setText(self._greeting() if connected else "Cumito")
+        self.home_members.set_members(self.state.get("members") or [], self.my_name())
+        self.home_members.setVisible(connected)
+        f = self._features()
+        albums = self._albums_cache if "albums" in f else []
+        acts = self._home_acts[-3:]
+        sig = (tuple((a.get("id"), a.get("name"), a.get("count"), a.get("color"), a.get("cover"),
+                      bool(self.art_cache.get(cover_key(a.get("cover"))))) for a in albums[:4]),
+               tuple((a.get("id"), a.get("text")) for a in acts), "albums" in f, connected)
+        if sig == self._home_sig:
             return
-        self._recent_sig = sig
+        self._home_sig = sig
+        while self.home_albums_grid.count():
+            it = self.home_albums_grid.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        for i, alb in enumerate(albums[:4]):
+            cover = self.art_cache.get(cover_key(alb.get("cover"))) if alb.get("cover") else None
+            if alb.get("cover") and cover is None:
+                self.albums_view._cover(alb)   # la pide al servidor (una vez)
+            card = AlbumCard(alb, cover)
+            card.clicked.connect(lambda a=alb: (self.open_albums(), self.albums_view.open_album(a)))
+            self.home_albums_grid.addWidget(card, i // 2, i % 2)
+        show_albums = "albums" in f and connected
+        self.home_albums_header.setVisible(show_albums)
+        self.home_albums_more.setVisible(show_albums and len(albums) > 4)
+        if show_albums and not albums:
+            hint = QLabel("Todavía no hay discos. Arma el primero con tus canciones favoritas.")
+            hint.setWordWrap(True)
+            hint.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:11.5px; background:transparent;")
+            self.home_albums_grid.addWidget(hint, 0, 0, 1, 2)
+        while self.home_act_box.count():
+            it = self.home_act_box.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        for a in reversed(acts):
+            self.home_act_box.addWidget(ActivityLine(a))
+        self.home_act_header.setVisible(bool(acts) and connected)
 
-        while self.recent_list_layout.count() > 1:
-            item = self.recent_list_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-
-        for r in recent:
-            self.art_cache.request(r.get("art_url"))
-            row = _TrackRow(r.get("title") or "Sin título", r.get("uploader") or "", r.get("duration"),
-                            pixmap=self.art_cache.get(r.get("art_url")), removable=False)
-            row.setToolTip("Ponerla otra vez")
-            row.clicked.connect(lambda url=r.get("webpage_url"): url and self.send_command("play", query=url))
-            self.recent_list_layout.insertWidget(self.recent_list_layout.count() - 1, row)
-
-        has_recent = bool(recent)
-        self.recent_header.setVisible(has_recent)
-        self.recent_scroll.setVisible(has_recent)
-        self.recent_empty_label.setVisible(not has_recent)
+    def _home_new_album(self):
+        self.open_albums()
+        self.albums_view.open_editor(None)
 
     def _refresh_now(self):
         np = self.state.get("now_playing")
@@ -2701,9 +2855,10 @@ class GlassScreen(QWidget):
             if self._showing_placeholder is not True:
                 self._set_art_background(_placeholder_art(W, H))
                 self._showing_placeholder = True
-            self.mini_thumb.setPixmap(_gradient_label(42, 42, 10))
+            self.mini_thumb.set_pixmap(None)
             self.mp_thumb.setPixmap(_gradient_label(32, 32, 9))
             self._set_play_icon(False)
+            self.title_eq.set_active(False)
             return
 
         self._showing_placeholder = False
@@ -2722,11 +2877,11 @@ class GlassScreen(QWidget):
         cached = self.art_cache.get(art_url)
         if cached is not None:
             self._set_art_background(cached)
-            self.mini_thumb.setPixmap(_rounded(_cover_pixmap(cached, 42, 42), 10))
+            self.mini_thumb.set_pixmap(cached)
             self.mp_thumb.setPixmap(_rounded(_cover_pixmap(cached, 32, 32), 9))
         else:
             self.art_cache.request(art_url)
-            self.mini_thumb.setPixmap(_gradient_label(42, 42, 10))
+            self.mini_thumb.set_pixmap(None)
             self.mp_thumb.setPixmap(_gradient_label(32, 32, 9))
 
         dur = np.get("duration") or 0
@@ -2735,6 +2890,8 @@ class GlassScreen(QWidget):
         self.time_total.setText(fmt_time(dur))
         self.progress.setFraction(elapsed / dur if dur else 0)
         self._set_play_icon(not np.get("paused"))
+        self.mini_thumb.set_paused(bool(np.get("paused")))
+        self.title_eq.set_active(not np.get("paused") and self.state.get("connected", True))
 
     def _set_play_icon(self, playing: bool):
         name = "pause" if playing else "play"
@@ -2848,6 +3005,15 @@ class GlassScreen(QWidget):
                 self._drag_pos = None
                 return True
             return False
+        if obj is self.search_dim and ev.type() == QEvent.MouseButtonPress:
+            self._close_search()
+            return True
+        if obj is self.recent_scroll.viewport() and ev.type() == QEvent.Wheel:
+            bar = self.recent_scroll.horizontalScrollBar()
+            if bar.maximum() > 0:
+                bar.setValue(bar.value() - ev.angleDelta().y())
+                return True
+            return False
         if obj is self.sheet_handle and ev.type() == QEvent.MouseButtonPress:
             self._close_sheet() if self._sheet_open else self._open_sheet()
             return True
@@ -2905,45 +3071,101 @@ class GlassScreen(QWidget):
 
     # ---- buscador ----
     def _open_search(self):
-        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+        if self._panel_mode == "search":
+            return
+        if self._panel_mode:
             self._leave_panel()
-        if self._panel_mode == "status":
-            self._status_timer.stop()
-            self.status_panel.hide()
-        if self._panel_mode == "settings":
-            self.settings_view.hide()
-        if self._panel_mode == "activity":
-            self.activity_view.hide()
         self._close_sheet()
         self._panel_mode = "search"
         self._searching = True
-        self._set_pills_visible(False)
         if not self.search_input.text().strip():
             self._refresh_search_home()
             self._show_search_state("home")
-        self._panel_in(self.search_view)
+        # ¿de dónde sale la píldora? (la de arriba, o la barra grande del inicio)
+        src = self.empty_search if (self._empty_mode and self.empty_view.isVisible()) else self.search_pill
+        if src is self.search_pill:
+            g = self.search_pill.geometry()
+            tl = self.search_pill.mapTo(self, g.topLeft() - g.topLeft())
+            start = QRect(tl.x() - 4, tl.y() - 4, g.width() + 9, g.height() + 9)
+        else:
+            tl = src.mapTo(self, QPoint(0, 0))
+            start = QRect(tl.x(), tl.y(), src.width(), src.height())
+        self._search_from = (src, start)
+        self.search_morph.word = "Buscar" if src is self.search_pill else src.word
+        src.hide()
+        self._set_pills_visible(False)
+        self.titlebar.hide()
+        self.reaction_bar.hide()
+        # 1) se oscurece todo
+        self.search_dim.setGeometry(0, 0, W, H)
+        self.search_dim.show()
+        self.search_dim.raise_()
+        self._fade(self.search_dim, show=True, duration=380)
+        # 2) la píldora se estira hasta arriba (con rebote)
+        self.search_morph.setGeometry(start)
+        self.search_morph.show()
+        self.search_morph.raise_()
+        self.search_morph.set_open(True)
+        anim = QPropertyAnimation(self.search_morph, b"geometry", self)
+        anim.setDuration(620)
+        anim.setStartValue(start)
+        anim.setEndValue(QRect(10, 12, W - 20, 55))
+        ease = QEasingCurve(QEasingCurve.OutBack)
+        ease.setOvershoot(1.05)
+        anim.setEasingCurve(ease)
+        self._morph_anim = anim
+        anim.start()
+        # 3) aparece lo de abajo
+        self.search_view.move(0, 70)
+        self.search_view.raise_()
+        self.search_morph.raise_()
+        QTimer.singleShot(120, lambda: self._panel_mode == "search" and self._fade(self.search_view, True, 420))
         self.mini_player.show()
         self.mini_player.raise_()
         self.text_overlay.raise_()
-        self._liquid_bar_in()
+        self.toast.raise_()
         self.search_input.setFocus()
         self.search_input.selectAll()
 
+    def _search_teardown(self, animate=True):
+        """Deshace el buscador (la píldora vuelve a su lugar)."""
+        src, start = self._search_from or (self.search_pill, None)
+        self.mini_player.hide()
+        self.search_morph.set_open(False)
+        self.titlebar.show()
+
+        def done():
+            self.search_morph.hide()
+            src.show()
+            self._set_pills_visible(not self._empty_mode and not self._panel_mode)
+            if self._empty_mode:
+                self.empty_search.show()
+
+        if animate and start is not None:
+            self._fade(self.search_view, show=False, duration=200)
+            self._fade(self.search_dim, show=False, duration=380)
+            anim = QPropertyAnimation(self.search_morph, b"geometry", self)
+            anim.setDuration(420)
+            anim.setStartValue(self.search_morph.geometry())
+            anim.setEndValue(start)
+            anim.setEasingCurve(QEasingCurve.InOutCubic)
+            anim.finished.connect(done)
+            self._morph_anim = anim
+            anim.start()
+        else:
+            self.search_view.hide()
+            self.search_dim.hide()
+            done()
+
     def _liquid_bar_in(self):
-        """La barra de búsqueda se "estira" al aparecer, con un rebotito."""
-        anim = QPropertyAnimation(self.search_input, b"maximumWidth", self)
-        anim.setDuration(560)
-        anim.setStartValue(70)
-        anim.setEndValue(W - 28 - 30 - 8)
-        anim.setEasingCurve(QEasingCurve.OutBack)
-        anim.finished.connect(lambda: self.search_input.setMaximumWidth(16777215))
-        self._bar_anim = anim
-        anim.start()
+        pass   # (2.0: ahora se estira la píldora entera, ver _open_search)
 
     def _close_search(self):
-        self._panel_out(self.search_view)
-        self.mini_player.hide()
-        self._after_panel_closed()
+        if self._panel_mode != "search":
+            return
+        self._panel_mode = None
+        self._searching = False
+        self._search_teardown(animate=True)
 
     def _show_search_state(self, state):
         """"home" (recientes), "loading" (Cumito saltando) o "results"."""
@@ -2963,8 +3185,8 @@ class GlassScreen(QWidget):
     def _section_label(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            f"color:{theme.GLASS_TEXT_MUTE}; font-size:10px; font-weight:700; letter-spacing:1px;"
-            " background:transparent; padding-top:8px;"
+            "color: rgba(244,242,250,0.55); font-size:10px; font-weight:800; letter-spacing:1.3px;"
+            " background:transparent; padding-top:14px; padding-bottom:4px;"
         )
         return lbl
 
@@ -2977,19 +3199,14 @@ class GlassScreen(QWidget):
 
         if self.recent_searches:
             lay.addWidget(self._section_label("BÚSQUEDAS RECIENTES"))
+            chips = []
             for q in self.recent_searches:
-                btn = QPushButton("  " + q)
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.setFixedHeight(36)
-                btn.setIcon(icons.icon("search", "#A9A6B2", 14))
-                btn.setIconSize(QSize(14, 14))
-                btn.setStyleSheet(
-                    f"QPushButton {{ text-align:left; padding-left:10px; background:transparent; border:none;"
-                    f" border-radius:10px; color:{theme.GLASS_TEXT}; font-size:12px; }}"
-                    "QPushButton:hover { background: rgba(255,255,255,0.08); }"
-                )
-                btn.clicked.connect(lambda _=False, q=q: (self.search_input.setText(q), self._submit_search()))
-                lay.addWidget(btn)
+                c = Chip(q)
+                c.clicked.connect(lambda _=False, q=q: (self.search_input.setText(q), self._submit_search()))
+                chips.append(c)
+            flow = FlowBox(8)
+            flow.set_items(chips)
+            lay.addWidget(flow)
 
         recent = self.state.get("recent") or []
         if recent:
@@ -3118,15 +3335,7 @@ class GlassScreen(QWidget):
         self._show_search_state("home")
 
     def _style_search_tabs(self):
-        for kind, b in self.search_tabs.items():
-            on = kind == self._search_kind
-            b.setStyleSheet(
-                "QPushButton { border-radius: 10px; padding: 0 15px; font-size: 12.5px; font-weight: 700;"
-                + (" background: rgba(255,255,255,0.92); color: #141318; border: none; }"
-                   if on else
-                   " background: rgba(255,255,255,0.09); color: #F2F0F7; border: 1px solid rgba(255,255,255,0.10); }"
-                   "QPushButton:hover { background: rgba(255,255,255,0.16); }")
-            )
+        self.search_tabs.set_current(self._search_kind, animate=False)
 
     def _set_search_kind(self, kind):
         if kind == self._search_kind:
@@ -3384,7 +3593,7 @@ class GlassScreen(QWidget):
             self.mini.set_dim(self.visual["mini_dim"])
 
     def _open_settings(self):
-        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+        if self._panel_mode in ("lyrics", "albums", "wrapped", "search"):
             self._leave_panel()
         if self._panel_mode == "status":
             self._status_timer.stop()

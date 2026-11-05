@@ -290,6 +290,8 @@ def main():
     if scale < 0.999:
         os.environ["QT_SCALE_FACTOR"] = f"{scale:.2f}"
     app = QApplication(sys.argv)
+    from cumito import theme
+    theme.load_fonts(app)
     icon = QIcon(str(ICON_PATH))
     app.setWindowIcon(icon)
 
