@@ -1,0 +1,13 @@
+botones: shuffle=True repeat=True heart=True lyrics=True react=True discos_pill=True prev_on=True seek=True
+servidor viejo: shuffle=False heart=False discos_pill=False prev_on=False
+adelantar: ('seek', {'pos': 129.0})
+pidió la letra: ('lyrics', {})
+guardar disco: album_update ['color', 'id', 'name']
+mandó: album_list {}
+mandó: activity_list {}
+mandó: seek {'pos': 129.0}
+mandó: lyrics {}
+mandó: album_list {}
+mandó: album_update {'id': 1, 'name': 'Para el carro', 'color': '#E0457B'}
+mandó: album_list {}
+mandó: stats {'period': 'month'}

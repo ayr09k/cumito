@@ -1,0 +1,11 @@
+la página avisó que está lista
+lista: True
+mandó: ('album_list', {})
+mandó: ('activity_list', {})
+mandó: ('save', 'recent_searches', ['bad bunny', 'travis scott', 'la bachata', 'queen'])
+mandó: ('search', 'bad bunny', 'music')
+mandó: ('lyrics', {})
+mandó: ('album_list', {})
+mandó: ('status', {})
+mandó: ('status', {})
+mandó: ('status', {})

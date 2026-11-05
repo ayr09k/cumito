@@ -1,0 +1,8 @@
+antes: [1, 2, 5]
+arrastrando: drag=sí cursor=mano cerrada orden_durante=[5, 1, 2] cursor_pos=410,400 esperado=410,400
+scroll=0 alto_lista=380
+centros: [(5, 47), (1, 95), (2, 143)] y_mouse=78
+la ventana se movió: no
+después de soltar: drag=terminado cursor=normal orden=[5, 1, 2]
+Esc: drag=cancelado orden=[5, 1, 2]
+la fila sigue respondiendo a clics: sí
