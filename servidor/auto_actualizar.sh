@@ -35,6 +35,11 @@ if [ -z "${CUMITO_YA_NUEVO:-}" ] && [ -f "$NUEVO" ] && ! cmp -s "$NUEVO" "$0"; t
   CUMITO_YA_NUEVO=1 exec "$0"
 fi
 
+# 1b) la app del celular (si se activó con activar_movil.sh): siempre al día
+if [ -d /var/www/cumito ]; then
+  cp -rT "$REPO_DIR/app/assets" /var/www/cumito
+fi
+
 # 2) ¿qué cambió? (sin copiar nada todavía)
 sincronizar() {  # $1 = "ver" (solo listar) o "copiar"
   como python3 - "$REPO_DIR/servidor" "$CARPETA" "$1" <<'PY'

@@ -3,6 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>Cumito</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0B0A10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cumito">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script>window.CUMITO_MOBILE = !window.qt && /^https?:/.test(location.protocol); if (window.CUMITO_MOBILE) document.documentElement.className = 'mobile';</script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -251,5 +260,6 @@
 </div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script src="app.js"></script>
+<script src="mobile.js"></script>
 </body>
 </html>

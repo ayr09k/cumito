@@ -15,6 +15,7 @@ function doSearch(q, limit, offset, kind) { if (B) B.search(q, limit, offset, ki
 /* ======================= utilidades ======================= */
 const $ = (id) => document.getElementById(id);
 const W = $('win');
+const MOBILE = !!window.CUMITO_MOBILE;
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const cls = (name, on) => W.classList.toggle(name, !!on);
 const has = (name) => W.classList.contains(name);
@@ -410,6 +411,7 @@ const DRAG = { on: false };
   $('qscroll').addEventListener('pointerdown', (e) => {
     const row = e.target.closest('#readyBox .qrow');
     if (!row || e.target.closest('.qx') || e.button !== 0) return;
+    if (e.pointerType === 'touch' && !e.target.closest('.grip')) return;   // con el dedo, desde los puntitos
     start = { row: row, x: e.clientX, y: e.clientY, id: e.pointerId, t: Date.now() };
   });
   window.addEventListener('pointermove', (e) => {
@@ -839,6 +841,7 @@ function optItems() {
     { key: 'server', label: 'Cambiar servidor', icon: 'server' },
     { key: 'name', label: 'Cambiar mi nombre', icon: 'user' },
     { key: 'power', label: 'Apagar Cumito', icon: 'power', danger: true });
+  if (MOBILE) return it.filter((x) => !['menu:apariencia', 'streamer', 'menu:conexiones', 'server'].includes(x.key));
   return it;
 }
 const ICON_CACHE = {};
@@ -871,7 +874,7 @@ function openOptions() {
 function renderOptions(newTitle) {
   const list = optItems();
   OPT.sel = Math.max(0, Math.min(list.length - 1, OPT.sel));
-  if (newTitle) $('optTitle').innerHTML = '<div class="ttl"><div class="big">' + esc(TITLES[OPT.menu] || 'Opciones') + '</div><div class="sm">Gira la rueda del mouse\ny toca la que quieras</div></div>';
+  if (newTitle) $('optTitle').innerHTML = '<div class="ttl"><div class="big">' + esc(TITLES[OPT.menu] || 'Opciones') + '</div><div class="sm">' + (MOBILE ? 'Desliza hacia arriba o abajo\ny toca la que quieras' : 'Gira la rueda del mouse\ny toca la que quieras') + '</div></div>';
   const box = $('witems');
   const html = list.map((it, i) => {
     const d = i - OPT.sel;
@@ -965,24 +968,25 @@ $('witems').addEventListener('click', (e) => {
 });
 
 /* ---------- escribir algo (nombre / servidor) ---------- */
-function prompt2(title, sub, value, key) {
+function prompt2(title, sub, value, key, required) {
   closePanel();
-  $('card2').dataset.card = 'prompt';
+  $('card2').dataset.card = required ? 'required' : 'prompt';
   $('card2').style.top = '150px';
   $('card2').innerHTML = '<div style="font-size:17px;font-weight:800">' + esc(title) + '</div><div class="tip" style="margin-top:4px">' + esc(sub) + '</div>' +
     '<input class="inp" id="p2in" style="margin-top:14px" value="' + esc(value) + '" maxlength="60">' +
-    '<div style="display:flex;gap:9px;margin-top:14px"><button class="btn secb" type="button" data-act="card2Close">Cancelar</button><button class="btn prim" type="button" data-act="p2save" data-key="' + key + '">Guardar</button></div>';
+    '<div style="display:flex;gap:9px;margin-top:14px">' + (required ? '' : '<button class="btn secb" type="button" data-act="card2Close">Cancelar</button>') + '<button class="btn prim" type="button" data-act="p2save" data-key="' + key + '">Guardar</button></div>';
   $('veil').classList.add('on'); $('card2').classList.add('on');
   setTimeout(() => { $('p2in').focus(); $('p2in').select(); }, 200);
+  $('p2in').addEventListener('keydown', (e) => { if (e.key === 'Enter') p2save(key); });
 }
-function closeCard2() { $('card2').classList.remove('on'); $('card2').dataset.card = ''; hideVeil(); }
+function closeCard2(force) { if ($('card2').dataset.card === 'required' && force !== true) return; $('card2').classList.remove('on'); $('card2').dataset.card = ''; hideVeil(); }
 function p2save(key) {
   const v = $('p2in').value.trim();
   if (key === 'display_name' && !v) return;
   save(key, v);
   if (key === 'display_name') { S.me = v; renderHome(); toast('Listo, ahora te ven como ' + v); }
   else toast('Conectando al servidor…');
-  closeCard2();
+  closeCard2(true);
 }
 
 /* ---------- actividad (chat) ---------- */
@@ -1447,7 +1451,7 @@ function setIdle(on) { cls('is-idle', on); }
 document.addEventListener('mousemove', () => { lastPoke = Date.now(); if (has('is-idle')) setIdle(false); });
 document.addEventListener('mousedown', () => { lastPoke = Date.now(); });
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden || MOBILE) return;
   const busy = !has('is-playing') || has('is-search') || has('is-sheet') || has('is-panel') || $('veil').classList.contains('on') || $('rbar').classList.contains('on') || $('banner').classList.contains('on') || DRAG.on || SEEK.drag;
   if (busy) { lastPoke = Date.now(); if (has('is-idle')) setIdle(false); return; }
   if (!has('is-idle') && Date.now() - lastPoke > 8000) setIdle(true);
@@ -1513,6 +1517,42 @@ W.addEventListener('mousedown', (e) => {
   const bg = t === W || t.id === 'drag' || t.closest('#drag') || t.classList.contains('art') || t.classList.contains('homebg') || t.classList.contains('blob') || t.classList.contains('doodles') && !t.closest('.panel') || t.classList.contains('scrim-t') || t.classList.contains('scrim-b') || t.id === 'home' || t.classList.contains('idlecap');
   if (bg && !has('is-search')) winCmd('drag');
 });
+
+/* deslizar con el dedo (celular) */
+(function () {
+  let y0 = null, x0 = null, acc = 0, where = null;
+  W.addEventListener('touchstart', (e) => {
+    const t = e.touches[0]; y0 = t.clientY; x0 = t.clientX; acc = 0;
+    where = e.target.closest('#wheel') ? 'wheel' : (e.target.closest('#bottom') ? 'bottom' : (e.target.closest('.grab,.sheet-h') ? 'sheet' : (e.target.closest('#lyr') ? 'lyr' : null)));
+  }, { passive: true });
+  W.addEventListener('touchmove', (e) => {
+    if (y0 === null || !where) return;
+    const y = e.touches[0].clientY, dy = y - y0;
+    if (where === 'wheel') {
+      e.preventDefault();
+      acc += dy; y0 = y;
+      while (acc <= -38) { optGo(OPT.sel + 1); acc += 38; }
+      while (acc >= 38) { optGo(OPT.sel - 1); acc -= 38; }
+    } else if (where === 'lyr') {
+      e.preventDefault();
+      const box = $('lyin');
+      const m = /translateY\((-?[\d.]+)px\)/.exec(box.style.transform || '');
+      box.style.transition = 'none';
+      box.style.transform = 'translateY(' + ((m ? parseFloat(m[1]) : 0) + dy) + 'px)';
+      y0 = y;
+      LY.manualUntil = Date.now() + 4000;
+      clearTimeout(LY.back); LY.back = setTimeout(() => { box.style.transition = ''; lyScrollTo(LY.cur); }, 4100);
+    }
+  }, { passive: false });
+  W.addEventListener('touchend', (e) => {
+    if (y0 === null) return;
+    const t = e.changedTouches[0], dy = t.clientY - y0, dx = Math.abs(t.clientX - x0);
+    if (where === 'bottom' && dy < -40 && dx < 60) openSheet();
+    if (where === 'sheet' && dy > 50) closeSheet();
+    if (where === 'lyr') $('lyin').style.transition = '';
+    y0 = null; where = null;
+  }, { passive: true });
+})();
 
 /* Esc */
 document.addEventListener('keydown', (e) => {
