@@ -1753,6 +1753,17 @@ class GlassScreen(QWidget):
             " color: rgba(255,255,255,0.3); }"
         )
         self.btn_clear_queue.clicked.connect(self._ask_clear_queue)
+        # el disquito de la radio: prenderla / apagarla rápido desde la lista
+        self.btn_radio_q = QPushButton(" Radio")
+        self.btn_radio_q.setFixedHeight(28)
+        self.btn_radio_q.setCursor(Qt.PointingHandCursor)
+        self.btn_radio_q.setToolTip("Radio: cuando se acabe la lista, siguen canciones parecidas")
+        self.btn_radio_q.setIcon(icons.icon("disc", "#C9B4F8", 14))
+        self.btn_radio_q.setIconSize(QSize(14, 14))
+        self.btn_radio_q.clicked.connect(self._toggle_radio_q)
+        self.btn_radio_q.hide()
+        sheet_head.addWidget(self.btn_radio_q)
+        sheet_head.addSpacing(6)
         sheet_head.addWidget(self.btn_clear_queue)
         slay.addLayout(sheet_head)
 
@@ -1764,6 +1775,21 @@ class GlassScreen(QWidget):
         self.sheet_list_widget.remove.connect(lambda u: self._queue_cmd("queue_remove", u))
         self.sheet_list_widget.move.connect(lambda u, to: self.send_command("queue_move", uid=u, to=to))
         slay.addWidget(self.sheet_scroll, 1)
+        # lista vacía con algo sonando: pedir parecidas a mano (no solas)
+        self.btn_radio_gen = QPushButton(" Generar recomendaciones de esta canción")
+        self.btn_radio_gen.setFixedHeight(38)
+        self.btn_radio_gen.setCursor(Qt.PointingHandCursor)
+        self.btn_radio_gen.setIcon(icons.icon("disc", "#FFFFFF", 16))
+        self.btn_radio_gen.setIconSize(QSize(16, 16))
+        self.btn_radio_gen.setStyleSheet(
+            "QPushButton { background: rgba(142,108,242,0.30); border:1px solid rgba(201,180,248,0.55);"
+            " border-radius:19px; color:#fff; font-size:12px; font-weight:800; padding:0 16px; }"
+            "QPushButton:hover { background: rgba(142,108,242,0.45); }"
+            "QPushButton:disabled { color: rgba(255,255,255,0.6); }")
+        self.btn_radio_gen.clicked.connect(self._radio_gen)
+        self.btn_radio_gen.hide()
+        self._radio_gen_until = 0.0
+        slay.addWidget(self.btn_radio_gen, 0, Qt.AlignHCenter)
 
         self._sheet_anim = QPropertyAnimation(self.playlist_sheet, b"pos")
         self._sheet_anim.setDuration(320)
@@ -2915,9 +2941,43 @@ class GlassScreen(QWidget):
         idx = next((i for i, t in enumerate(self.state.get("queue") or []) if t.get("uid") == uid), -1)
         self.send_command(action, index=idx, uid=uid)
 
+    def _toggle_radio_q(self):
+        on = not self.state.get("radio")
+        self.send_command("set_radio", on=on)
+        self.state["radio"] = on
+        self._refresh_radio_q()
+        self.toast.show_text("Radio prendida: cuando se acabe la lista, siguen parecidas" if on else "Radio apagada", 1800)
+
+    def _radio_gen(self):
+        self._radio_gen_until = time.monotonic() + 15
+        self.send_command("radio_now")
+        self._refresh_radio_q()
+        QTimer.singleShot(15200, self._refresh_radio_q)
+
+    def _refresh_radio_q(self):
+        has = "radio" in self._features()
+        on = bool(self.state.get("radio"))
+        self.btn_radio_q.setVisible(has)
+        self.btn_radio_q.setText(" Radio prendida" if on else " Radio")
+        self.btn_radio_q.setStyleSheet(
+            "QPushButton { background: %s; border:1px solid %s; border-radius:14px; color:%s;"
+            " font-size:11px; font-weight:700; padding:0 12px 0 9px; }"
+            "QPushButton:hover { background: rgba(142,108,242,0.40); color:#fff; }"
+            % (("rgba(142,108,242,0.26)", "rgba(201,180,248,0.55)", "#E6DCFF") if on else
+               ("rgba(255,255,255,0.08)", "rgba(255,255,255,0.18)", "rgba(244,242,250,0.62)")))
+        queue = self.state.get("queue") or []
+        if queue:
+            self._radio_gen_until = 0.0
+        empty_playing = has and not queue and bool(self.state.get("now_playing"))
+        self.btn_radio_gen.setVisible(empty_playing)
+        busy = time.monotonic() < self._radio_gen_until
+        self.btn_radio_gen.setEnabled(not busy)
+        self.btn_radio_gen.setText(" Buscando parecidas…" if busy else " Generar recomendaciones de esta canción")
+
     def _refresh_sheet_list(self, force=False):
         queue = self.state.get("queue", []) or []
         self.btn_clear_queue.setEnabled(bool(queue))
+        self._refresh_radio_q()
         now = time.monotonic()
         # destello verde de 2 s cuando una canción recién queda lista
         for t in queue:

@@ -176,10 +176,15 @@
     <button class="btn grab" type="button" aria-label="Cerrar la playlist" data-act="sheet"><span></span></button>
     <div class="sheet-h">
       <span class="sec-t">PLAYLIST</span>
+      <span class="sheet-acts">
+      <button class="btn radio-pill" type="button" id="bradio" data-act="radioToggle" title="Radio: cuando se acabe la lista, siguen canciones parecidas">
+        <span class="vinyl"><i></i></span><span id="bradioT">Radio</span>
+      </button>
       <button class="btn danger-pill" type="button" id="bclear" data-act="clear">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFB3B5" stroke-width="2.2" stroke-linecap="round"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>
         Borrar lista
       </button>
+      </span>
     </div>
     <div class="qscroll" id="qscroll"></div>
   </div>

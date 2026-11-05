@@ -364,14 +364,24 @@ function renderQueue(force) {
     else QS.seen.add(t.uid);
   });
   $('bclear').disabled = !q.length;
-  const sig = JSON.stringify([np && [np.title, np.paused], q.map((t) => [t.uid, t.prepared, t.loading, t.art_url, t.title])]);
+  const rb = $('bradio');
+  rb.style.display = feat('radio') ? '' : 'none';
+  rb.classList.toggle('on', !!S.st.radio);
+  $('bradioT').textContent = S.st.radio ? 'Radio prendida' : 'Radio';
+  if (q.length || !np) QS.gen = false;
+  const sig = JSON.stringify([np && [np.title, np.paused], q.map((t) => [t.uid, t.prepared, t.loading, t.art_url, t.title]), !!S.st.radio, QS.gen]);
   if (sig === QS.sig && !force) return;
   QS.sig = sig;
   const ready = q.filter((t) => t.prepared !== undefined ? t.prepared : t.ready);
   const pend = q.filter((t) => !(t.prepared !== undefined ? t.prepared : t.ready));
   let h = '';
   if (np) h += '<div class="qnow"><span class="qc thumb" style="width:38px;height:38px;border-radius:10px;box-shadow:none;' + coverStyle(np.art_url, np.title) + '"></span><span style="flex:1;min-width:0"><span class="lab">SONANDO AHORA</span><span class="ell" style="display:block;font-size:13px;font-weight:800">' + esc(np.title) + '</span></span><span class="eqm"><i></i><i></i><i></i></span></div>';
-  if (!q.length) h += '<div class="qempty">La lista está vacía.<br>Busca algo para que siga la música.</div>';
+  if (!q.length && np && feat('radio')) {
+    // lista vacía con algo sonando: ofrecer recomendaciones (y no generarlas solas)
+    h += '<div class="qgen"><p>La lista está vacía.<br>¿Quieres que siga con canciones parecidas a esta?</p>' +
+      '<button class="btn gen' + (QS.gen ? ' busy' : '') + '" type="button" data-act="radioGen"><span class="vinyl"><i></i></span>' +
+      (QS.gen ? 'Buscando parecidas…' : 'Generar recomendaciones de esta canción') + '</button></div>';
+  } else if (!q.length) h += '<div class="qempty">La lista está vacía.<br>Busca algo para que siga la música.</div>';
   if (ready.length) {
     h += '<div class="ready"><div class="ready-t">LISTAS PARA SONAR · arrastra para ordenar</div><div id="readyBox">';
     ready.forEach((t, i) => {
@@ -1466,6 +1476,8 @@ const ACT = {
   heart: () => { PICK = { add: { current: true }, title: '' }; openPicker(false); }, lyrics: openLyrics, react: toggleReactions,
   openSearch: openSearch, closeSearch: closeSearch, more: () => { if (SR.moreLoading || !SR.query) return; SR.moreLoading = true; renderSearch(SR.results.length); doSearch(SR.query, 6, SR.results.length, SR.kind); },
   clear: () => { const n = (S.st.queue || []).length; if (!n) return; askConfirm('¿Seguro que quieres borrar TODO?', 'Se van a quitar ' + (n === 1 ? 'la canción' : 'las ' + n + ' canciones') + ' de la lista. Lo que está sonando ahora sigue sonando.', 'Mantén presionado para borrar', 'trash', () => { send('queue_clear'); toast('Lista borrada'); }); },
+  radioToggle: () => { const on = !S.st.radio; send('set_radio', { on: on }); S.st.radio = on; renderQueue(true); toast(on ? 'Radio prendida: cuando se acabe la lista, siguen parecidas' : 'Radio apagada'); },
+  radioGen: () => { if (QS.gen) return; QS.gen = true; send('radio_now'); renderQueue(true); setTimeout(() => { if (QS.gen) { QS.gen = false; renderQueue(true); } }, 15000); },
   cancelConfirm: closeConfirm, closePanel: () => closePanel(), optBack: optBack,
   albums: () => openAlbums(), newAlbum: () => openEditor(null, false), albumsBack: albumsBack,
   albumEdit: () => AL.cur && openEditor(AL.cur), albumPlay: () => { send('album_play', { id: AL.cur.id, shuffle: false }); toast('Poniendo «' + AL.cur.name + '»'); },

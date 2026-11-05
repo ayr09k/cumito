@@ -192,6 +192,8 @@ class CumitoServer:
             await bot.action_queue_remove(int(data.get("index", -1)), who=who, uid=data.get("uid"))
         elif action == "queue_move":
             await bot.action_queue_move(data.get("uid"), int(data.get("to", 0)), who=who)
+        elif action == "radio_now":
+            await bot.action_radio_now(who=who)
         elif action == "queue_clear":
             await bot.action_queue_clear(who=who)
         elif action == "set_volume":

@@ -1016,6 +1016,25 @@ class BotCore:
             if seed:
                 self._maybe_radio(seed, start_after=self.current is None)
 
+    async def action_radio_now(self, who=None):
+        """Botón de la lista vacía: "Generar recomendaciones de esta canción".
+        Agrega una tanda de parecidas UNA vez, sin prender la radio."""
+        seed = self.current or (self.played[-1] if self.played else None)
+        if not seed or (self._radio_task and not self._radio_task.done()):
+            return
+        self.log_activity(who, "radio", "pidió recomendaciones", title=f"Parecidas a {seed.get('title')}",
+                          sub=seed.get("uploader"), art=seed.get("art_url"))
+        self._radio_task = asyncio.create_task(self._radio_fill(seed, start_after=self.current is None, force=True))
+
+    def _radio_off_if_emptied(self, who):
+        """Si vaciaron la lista a mano con la radio prendida, se apaga: si no,
+        la radio la vuelve a llenar y se hace un bucle de borrar y que aparezcan
+        más. En la lista sale el botón para pedir recomendaciones cuando quieran."""
+        if self.radio and not self.queue:
+            self.radio = False
+            self.log_activity(who, "radio", "vació la lista: la radio se apagó")
+            self.on_change()
+
     def _maybe_radio(self, seed, start_after=False):
         if not self.radio or (self._radio_task and not self._radio_task.done()):
             return
@@ -1023,7 +1042,7 @@ class BotCore:
             return
         self._radio_task = asyncio.create_task(self._radio_fill(seed, start_after))
 
-    async def _radio_fill(self, seed, start_after=False):
+    async def _radio_fill(self, seed, start_after=False, force=False):
         url = seed.get("webpage_url")
         if not video_id(url):
             return
@@ -1034,7 +1053,9 @@ class BotCore:
         except Exception as e:
             log.warning("La radio no respondió: %s", str(e)[:120])
             return
-        if not tracks or not self.radio:
+        if not tracks or not (self.radio or force):
+            if force:
+                self.on_change()   # que la app deje de decir "Buscando parecidas…"
             return
         for t in tracks:
             t["who"] = "Radio"
@@ -1144,6 +1165,7 @@ class BotCore:
             self.queue = deque(q)
             self.log_activity(who, "remove", "quitó de la lista", title=gone.get("title"),
                               sub=gone.get("uploader"), art=gone.get("art_url") if gone.get("prepared") else None)
+            self._radio_off_if_emptied(who)
             self._prefetch_next()
 
     async def action_queue_move(self, uid, to_index, who=None):
@@ -1167,6 +1189,7 @@ class BotCore:
             n = len(self.queue)
             self.queue.clear()
             self.log_activity(who, "clear", f"vació la lista ({n} canciones)")
+            self._radio_off_if_emptied(who)
 
     async def action_set_volume(self, value, who=None):
         try:

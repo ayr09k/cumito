@@ -1,3 +1,9 @@
+## Cumito 2.2.5
+
+- **Radio en la playlist:** arriba, junto a "Borrar lista", hay un disquito para prender o apagar la radio al toque (gira cuando está prendida).
+- **Se acabó el bucle de la radio:** si vacías la lista con la radio prendida, la radio se apaga sola y ya no vuelve a llenarla.
+- Con la lista vacía y algo sonando aparece el botón **"Generar recomendaciones de esta canción"**: agrega canciones parecidas una sola vez, sin prender la radio.
+
 ## Cumito 2.2.4
 
 - Arreglado: en modo streamer, el mini ya no aparece solo encima de un juego u otra ventana. Ahora solo cambia al mini cuando Cumito es la ventana que estás usando.
