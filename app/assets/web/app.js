@@ -40,6 +40,7 @@ const I = {
   shuffle: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3.5c2 0 3.2 1 4.3 2.6l2.4 3.8c1.1 1.6 2.3 2.6 4.3 2.6H21M3 17h3.5c1.4 0 2.4-.5 3.2-1.3M13.3 8.3c.8-.8 1.8-1.3 3.2-1.3H21M18 4l3 3-3 3M18 14l3 3-3 3"/></svg>',
   plus: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   img: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5L20 17"/></svg>',
+  heart: '<svg width="14" height="14" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>',
   trash: '<svg class="trash" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#FF6B70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 11v5M13.5 11v5"/></svg>',
   power: '<svg class="trash" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#FF6B70" stroke-width="2" stroke-linecap="round"><path d="M12 4v7.5M7.3 7.2a7 7 0 1 0 9.4 0"/></svg>',
 };
@@ -75,7 +76,7 @@ const HANDLERS = {
   status(d) { renderStatus(d); },
   lyrics(d) { onLyrics(d); },
   stats(d) { renderWrapped(d); },
-  albums(d) { S.albums = d.albums || []; renderHome(); if (P.open === 'albums' && AL.view === 'grid') renderAlbums(); if ($('card2').dataset.kind === 'picker') openPicker(true); },
+  albums(d) { S.albums = d.albums || []; renderHome(); if (P.open === 'albums' && AL.view === 'grid') renderAlbums(); if ($('card2').dataset.card === 'picker') openPicker(true); },
   album(d) { onAlbum(d.album); },
   album_cover(d) { if (d.cover && d.data) { S.covers[d.cover] = 'data:image/jpeg;base64,' + d.data; renderHome(); if (P.open === 'albums') renderAlbums(true); } },
   album_added(d) { onAlbumAdded(d); },
@@ -377,6 +378,7 @@ function renderQueue(force) {
         '<span class="qc" style="' + coverStyle(t.art_url, t.title) + '"></span>' +
         '<span style="flex:1;min-width:0"><span class="qt ell">' + esc(t.title) + '</span><span class="qa ell">' + esc(t.uploader || '') + (t.who && t.who !== S.me ? ' · ' + esc(t.who === 'Radio' ? 'radio' : t.who) : '') + '</span></span>' +
         '<span class="qd">' + (t.duration ? fmt(t.duration) : '') + '</span>' +
+        (feat('albums') ? '<button class="btn qx" type="button" title="Guardar en un disco" data-qheart="' + t.uid + '">' + I.heart + '</button>' : '') +
         '<button class="btn qx" type="button" title="Quitar" data-remove="' + t.uid + '">' + I.x + '</button>' +
         '<span class="grip">' + I.grip + '</span></div>';
     });
@@ -388,6 +390,7 @@ function renderQueue(force) {
       h += '<div class="qrow row pend' + (t.loading ? ' loading' : '') + '" data-prep="' + t.uid + '" style="animation-delay:' + (0.34 + Math.min(i, 8) * 0.06) + 's">' +
         '<span class="qc"></span><span style="flex:1;min-width:0"><span class="qt ell">' + esc(t.title) + '</span><span class="qa">' + (t.loading ? 'Preparándola…' : 'Tócala para prepararla') + '</span></span>' +
         '<span class="qd">' + (t.duration ? fmt(t.duration) : '') + '</span>' +
+        (feat('albums') ? '<button class="btn qx" type="button" title="Guardar en un disco" data-qheart="' + t.uid + '">' + I.heart + '</button>' : '') +
         '<button class="btn qx" type="button" title="Quitar" data-remove="' + t.uid + '">' + I.x + '</button></div>';
     });
   }
@@ -592,7 +595,8 @@ function tileHtml(r, i, k) {
     '<div style="position:relative;width:34px;height:34px;display:flex;align-items:center;justify-content:center"><div class="spin" style="position:absolute"></div>' +
     '<svg class="chk" style="position:absolute" width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(255,255,255,.18)"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
     '<span class="lbl" style="font-size:12px;font-weight:800;color:#fff">' + (st && st.phase === 'added' ? 'Añadido' : (st && st.phase === 'failed' ? 'No se pudo' : 'Añadiendo…')) + '</span></div>' +
-    '<span class="badge">Añadido · #' + (st ? st.pos : '') + ' en la lista</span></div>' +
+    '<span class="badge">Añadido · #' + (st ? st.pos : '') + ' en la lista</span>' +
+    (feat('albums') ? '<span class="btn th" role="button" title="Guardar en un disco" data-sheart="' + i + '">' + I.heart + '</span>' : '') + '</div>' +
     '<div class="ell" style="font-size:12.5px;font-weight:800;margin-top:8px">' + esc(r.title) + '</div>' +
     '<div class="ell" style="font-size:10.5px;font-weight:600;color:rgba(244,242,250,.55)">' + esc(r.uploader || '') + (r.duration ? ' · ' + fmt(r.duration) : '') + '</div></button>';
 }
@@ -963,7 +967,7 @@ $('witems').addEventListener('click', (e) => {
 /* ---------- escribir algo (nombre / servidor) ---------- */
 function prompt2(title, sub, value, key) {
   closePanel();
-  $('card2').dataset.kind = 'prompt';
+  $('card2').dataset.card = 'prompt';
   $('card2').style.top = '150px';
   $('card2').innerHTML = '<div style="font-size:17px;font-weight:800">' + esc(title) + '</div><div class="tip" style="margin-top:4px">' + esc(sub) + '</div>' +
     '<input class="inp" id="p2in" style="margin-top:14px" value="' + esc(value) + '" maxlength="60">' +
@@ -971,7 +975,7 @@ function prompt2(title, sub, value, key) {
   $('veil').classList.add('on'); $('card2').classList.add('on');
   setTimeout(() => { $('p2in').focus(); $('p2in').select(); }, 200);
 }
-function closeCard2() { $('card2').classList.remove('on'); $('card2').dataset.kind = ''; hideVeil(); }
+function closeCard2() { $('card2').classList.remove('on'); $('card2').dataset.card = ''; hideVeil(); }
 function p2save(key) {
   const v = $('p2in').value.trim();
   if (key === 'display_name' && !v) return;
@@ -1278,7 +1282,7 @@ function openAlbum(id) {
 function onAlbum(a) {
   AL.saving = false;
   if (!a) { if (AL.view === 'page') { AL.view = 'grid'; renderAlbums(); } return; }
-  if (AL.view === 'edit' && AL.addAfter && !AL.edit.id) { AL.addAfter = false; send('album_add', { id: a.id, current: true }); }
+  if (AL.view === 'edit' && AL.addAfter && !AL.edit.id) { AL.addAfter = false; send('album_add', Object.assign({ id: a.id }, PICK.add)); }
   if (AL.view === 'edit' || (AL.view === 'page' && AL.cur && AL.cur.id === a.id)) {
     AL.view = 'page'; AL.cur = a;
     if (P.open === 'albums') renderAlbums();
@@ -1332,15 +1336,18 @@ function onAlbumAdded(d) {
   } else toast('Ya estaba en «' + name + '»');
 }
 /* el corazón: elegir en qué disco guardar */
+let PICK = { add: { current: true }, title: '' };
+function pickFor(add, title) { PICK = { add: add, title: title }; openPicker(false); }
 function openPicker(refresh) {
   const np = S.st.now_playing;
-  if (!np) return;
+  if (!refresh && PICK.add.current) PICK.title = np ? np.title : '';
+  if (PICK.add.current && !np) return;
   if (!refresh) send('album_list');
   hideReactions();
   const c = $('card2');
-  c.dataset.kind = 'picker';
+  c.dataset.card = 'picker';
   c.style.top = '110px';
-  c.innerHTML = '<div style="font-size:16px;font-weight:800">Guardar en un disco</div><div class="tip ell" style="margin-top:2px">' + esc(np.title) + '</div>' +
+  c.innerHTML = '<div style="font-size:16px;font-weight:800">Guardar en un disco</div><div class="tip ell" style="margin-top:2px">' + esc(PICK.title) + '</div>' +
     '<div style="display:flex;flex-direction:column;gap:2px;margin-top:10px;max-height:300px;overflow-y:auto">' +
     (S.albums.length ? S.albums.map((a) => '<button class="row prow" type="button" data-pick="' + a.id + '">' + sleeveHtml(a, 38) + '<span style="flex:1;min-width:0;text-align:left"><span class="ell" style="display:block;font-size:12.5px;font-weight:800">' + esc(a.name) + '</span><span style="display:block;font-size:10.5px;font-weight:600;color:rgba(244,242,250,.5)">' + plural(a.count, 'canción', 'canciones') + '</span></span></button>').join('')
       : '<div class="tip" style="padding:10px 4px">Todavía no hay discos. ¡Crea el primero!</div>') +
@@ -1452,7 +1459,7 @@ const ACT = {
   sheet: () => (has('is-sheet') ? closeSheet() : openSheet()),
   toggle: () => { const np = S.st.now_playing; if (!np) return; send(np.paused ? 'resume' : 'pause'); np.paused = !np.paused; S.elapsed = curElapsed(); S.elapsedAt = performance.now(); renderAll(); },
   next: () => send('skip'), prev: () => send('prev'), shuffle: shuffle, repeat: cycleRepeat,
-  heart: () => openPicker(false), lyrics: openLyrics, react: toggleReactions,
+  heart: () => { PICK = { add: { current: true }, title: '' }; openPicker(false); }, lyrics: openLyrics, react: toggleReactions,
   openSearch: openSearch, closeSearch: closeSearch, more: () => { if (SR.moreLoading || !SR.query) return; SR.moreLoading = true; renderSearch(SR.results.length); doSearch(SR.query, 6, SR.results.length, SR.kind); },
   clear: () => { const n = (S.st.queue || []).length; if (!n) return; askConfirm('¿Seguro que quieres borrar TODO?', 'Se van a quitar ' + (n === 1 ? 'la canción' : 'las ' + n + ' canciones') + ' de la lista. Lo que está sonando ahora sigue sonando.', 'Mantén presionado para borrar', 'trash', () => { send('queue_clear'); toast('Lista borrada'); }); },
   cancelConfirm: closeConfirm, closePanel: () => closePanel(), optBack: optBack,
@@ -1471,15 +1478,17 @@ W.addEventListener('click', (e) => {
   let t;
   if ((t = e.target.closest('[data-play]'))) { send('play', { query: t.dataset.play }); toast('Agregando…'); if (has('is-search')) closeSearch(); return; }
   if ((t = e.target.closest('[data-chip]'))) { $('q').value = t.dataset.chip; submitSearch(); return; }
+  if ((t = e.target.closest('[data-sheart]'))) { const r = SR.results[+t.dataset.sheart]; if (r) pickFor({ tracks: [{ title: r.title, webpage_url: r.webpage_url, duration: r.duration, uploader: r.uploader, art_url: r.art_url }] }, r.title); return; }
   if ((t = e.target.closest('[data-tile]'))) { addTile(+t.dataset.tile); return; }
   if ((t = e.target.closest('[data-kind]'))) { setKind(t.dataset.kind); return; }
+  if ((t = e.target.closest('[data-qheart]'))) { e.stopPropagation(); const u = +t.dataset.qheart; const q = (S.st.queue || []).find((x) => x.uid === u); pickFor({ uid: u }, q ? q.title : ''); return; }
   if ((t = e.target.closest('[data-remove]'))) { e.stopPropagation(); qcmd('queue_remove', +t.dataset.remove); return; }
   if ((t = e.target.closest('[data-prep]'))) { qcmd('prepare', +t.dataset.prep); toast('Preparándola…', 1400); return; }
   if ((t = e.target.closest('[data-album]'))) { openAlbum(+t.dataset.album); return; }
   if ((t = e.target.closest('[data-aremove]'))) { e.stopPropagation(); send('album_remove', { id: AL.cur.id, track_id: +t.dataset.aremove }); return; }
   if ((t = e.target.closest('[data-atrack]'))) { const tr = (AL.cur.tracks || [])[+t.dataset.atrack]; if (tr) { send('play', { query: tr.webpage_url }); toast('Agregando «' + tr.title + '»'); } return; }
   if ((t = e.target.closest('[data-color]'))) { AL.edit.color = t.dataset.color; renderAlbums(); return; }
-  if ((t = e.target.closest('[data-pick]'))) { send('album_add', { id: +t.dataset.pick, current: true }); closeCard2(); return; }
+  if ((t = e.target.closest('[data-pick]'))) { send('album_add', Object.assign({ id: +t.dataset.pick }, PICK.add)); closeCard2(); return; }
   if ((t = e.target.closest('[data-period]'))) { loadWrapped(t.dataset.period); return; }
   if ((t = e.target.closest('[data-emoji]'))) { send('react', { emoji: t.dataset.emoji }); hideReactions(); return; }
   if (e.target === $('dim')) { closeSearch(); return; }

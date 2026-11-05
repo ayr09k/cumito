@@ -1,3 +1,7 @@
+## Cumito 2.2.3
+
+- **Corazón en cualquier canción:** pasa el mouse por un resultado del buscador o por una canción de la lista y toca el ♡ para guardarla en un disco, sin tener que escucharla.
+
 ## Cumito 2.2.2
 
 - Arreglado: en PCs con las animaciones de Windows reducidas, el fondo y el título se repetían rapidísimo y las opciones se movían a saltos.
