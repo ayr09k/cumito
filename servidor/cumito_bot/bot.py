@@ -19,6 +19,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
+from . import audio_cache
 from . import lyrics as lyrics_mod
 from . import spotify
 from .db import Store
@@ -74,6 +75,8 @@ def _ffmpeg_stderr():
 HISTORY_PATH = Path(__file__).resolve().parent.parent / "history.json"
 HISTORY_MAX = 10
 STREAM_FRESH_S = 2 * 60 * 60  # cuánto se confía en un enlace de audio ya resuelto
+LOCAL_WAIT_S = 6              # cuánto se espera a que baje una canción antes de ponerla directo
+CACHE_AHEAD = 2               # cuántas de la cola se dejan bajadas
 
 # La sesión (lo que suena, en qué segundo iba y la lista): se guarda todo el
 # rato, así si el servidor se reinicia (una actualización, un corte) retoma
@@ -159,6 +162,10 @@ class BotCore:
         self.client = discord.Client(intents=intents)
         self.tree = app_commands.CommandTree(self.client)
         self.db = store or Store()
+        try:
+            audio_cache.startup()
+        except Exception:
+            log.exception("No se pudo abrir la carpeta del caché de audio")
 
         self.queue: deque = deque()
         self.current: dict | None = None
@@ -631,7 +638,8 @@ class BotCore:
             # de STREAM_FRESH_S), se usa tal cual: así el skip es casi
             # instantáneo. Los enlaces de audio de YouTube vencen después de
             # unas horas, así que si es más vieja se vuelve a pedir.
-            from_cache = self._is_ready(track)
+            # ya bajada al disco: no hace falta volver a pedirle el enlace a YouTube
+            from_cache = self._is_ready(track) or audio_cache.ready_path(track) is not None
             if not from_cache:
                 data = await extract(track["webpage_url"], title_hint=track.get("title"), urgent=True)
                 data.pop("uid", None)
@@ -639,13 +647,32 @@ class BotCore:
                 track["prepared"] = True
             if self.current is not track or self._closing:
                 return  # mientras se preparaba, alguien puso otra
-            log.info("Reproduciendo: %s%s", track.get("title"), f" (desde {int(start_at)} s)" if start_at else "")
+            # sonar desde el disco (ver audio_cache): si no estaba bajada se
+            # espera un momento a que baje; si tarda, suena directo como antes
+            local = audio_cache.ready_path(track)
+            if local is None:
+                try:
+                    local = await asyncio.wait_for(audio_cache.fetch(track, urgent=True), LOCAL_WAIT_S)
+                except asyncio.TimeoutError:
+                    local = None
+                if self.current is not track or self._closing:
+                    return
+            log.info("Reproduciendo: %s%s%s", track.get("title"), f" (desde {int(start_at)} s)" if start_at else "",
+                     "" if local else " [directo]")
             options = FFMPEG_OPTIONS + (" " + FFMPEG_NORMALIZE if self.normalize else "")
-            source = discord.FFmpegPCMAudio(
-                track["stream_url"], executable=ffmpeg_path(),
-                before_options=_ffmpeg_before(track.get("http_headers")) + (f" -ss {start_at:.1f}" if start_at else ""),
-                options=options, stderr=_ffmpeg_stderr(),
-            )
+            seek = f" -ss {start_at:.1f}" if start_at else ""
+            if local:
+                source = discord.FFmpegPCMAudio(
+                    str(local), executable=ffmpeg_path(), before_options="-loglevel error" + seek,
+                    options=options, stderr=_ffmpeg_stderr(),
+                )
+            else:
+                source = discord.FFmpegPCMAudio(
+                    track["stream_url"], executable=ffmpeg_path(),
+                    before_options=_ffmpeg_before(track.get("http_headers")) + seek,
+                    options=options, stderr=_ffmpeg_stderr(),
+                )
+            self._cache_ahead()
             source = discord.PCMVolumeTransformer(source, volume=self.volume)
         except Exception:
             log.exception("No se pudo preparar '%s'; paso a la siguiente", track.get("title"))
@@ -694,6 +721,10 @@ class BotCore:
         """Terminó (o se cortó) una canción: qué viene después."""
         if reason not in ("seek",):
             asyncio.create_task(self._db_play_end(track, listened, skipped=reason in ("skip", "jump", "prev")))
+        if failed_fast:
+            bad = audio_cache.ready_path(track)   # un archivo que no sirve no se vuelve a usar
+            if bad:
+                bad.unlink(missing_ok=True)
         if failed_fast and from_cache and self.current is track:
             # el enlace guardado ya no servía: se vuelve a pedir una vez
             retry = {k: v for k, v in track.items() if k not in ("stream_url", "http_headers", "resolved_at", "_row")}
@@ -797,12 +828,20 @@ class BotCore:
             item["prepared"] = True
             item.pop("failed", None)
             self._move_to_ready(item)
+            self._cache_ahead()
         except Exception as e:
             item["failed"] = True
             log.warning("No se pudo preparar '%s': %s", item.get("title"), str(e)[:120])
         finally:
             item["loading"] = False
             self.on_change()
+
+    def _cache_ahead(self):
+        """Deja bajadas al disco las próximas CACHE_AHEAD de la cola, de a una
+        y en segundo plano, para que suenen sin trabones."""
+        for t in list(self.queue)[:CACHE_AHEAD]:
+            if self._is_ready(t) and not audio_cache.ready_path(t):
+                asyncio.create_task(audio_cache.fetch(t))
 
     def _prefetch_next(self):
         """Mantiene al menos PREFETCH_AHEAD canciones preparadas, tomando las

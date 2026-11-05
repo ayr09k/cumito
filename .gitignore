@@ -16,4 +16,5 @@ activity.json
 cumito.db
 cumito.db-*
 portadas/
+cache_audio/
 *.tmp
