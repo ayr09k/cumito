@@ -3006,8 +3006,15 @@ class GlassScreen(QWidget):
         elif not self._idle and time.monotonic() - self._last_poke > IDLE_S:
             self._set_idle(True)
 
+    def _is_minimized(self):
+        return self.isMinimized() or bool(self.windowState() & Qt.WindowMinimized) or not self.isVisible()
+
     def _check_streamer_idle(self):
-        """En modo streamer, 8 s sin tocar nada = vuelve solo al mini."""
+        """En modo streamer, 8 s sin tocar nada = vuelve solo al mini.
+        Si Cumito está minimizado, NO: se queda minimizado."""
+        if self._is_minimized():
+            self._last_poke = time.monotonic()
+            return
         pos = QCursor.pos()
         if pos != self._last_cursor:
             self._last_cursor = pos
@@ -3038,6 +3045,8 @@ class GlassScreen(QWidget):
             m.set_progress(0, 0, True)
 
     def enter_mini(self):
+        if self._is_minimized():
+            return  # minimizado = que se quede así (no sacar el mini solo)
         if self.mini is None:
             self.mini = MiniWindow(self.visual["mini_shape"], self.visual["chroma"])
             self.mini.setWindowIcon(self.windowIcon())
@@ -3139,6 +3148,8 @@ class GlassScreen(QWidget):
 
     # ================= animación / reloj =================
     def _on_tick(self):
+        if self._is_minimized():
+            return
         if self.visual.get("streamer"):
             if self._idle:
                 self._set_idle(False)

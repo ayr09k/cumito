@@ -372,4 +372,19 @@ for shape in ("cuadrado", "vertical", "ancho", "circulo", "disco"):
     print("foto mini", shape)
     w.exit_mini()
     wait(200)
+# minimizado en modo streamer: NO debe aparecer el mini solo
+w.visual["streamer"] = True
+if w.mini is not None:
+    w.mini.hide()
+w.show()
+wait(300)
+w.showMinimized()
+wait(500)
+w._last_poke -= 60
+for _ in range(4):
+    w._on_tick()
+    wait(100)
+mini_visible = w.mini is not None and w.mini.isVisible()
+(OUT / "PRUEBA_MINIMIZADO.txt").write_text(
+    f"minimizado={w.isMinimized()} mini_apareció={'SÍ (mal)' if mini_visible else 'no'}", encoding="utf-8")
 print("listo")
