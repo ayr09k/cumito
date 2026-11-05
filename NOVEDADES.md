@@ -1,7 +1,6 @@
-## Cumito 2.1 · el diseño nuevo
+## Cumito 2.2 · igual al diseño
 
-- **Inicio nuevo:** saludo, quién está conectado, Cumito (si lo tocas, salta), lo último que sonó en tarjetas, los discos del grupo y la actividad reciente.
-- **Buscar:** la barra se estira hasta arriba, todo se oscurece con estrellitas y las pestañas Música/Todo se deslizan. Las búsquedas recientes salen como pastillitas.
-- **Ahora sonando:** botón de play de vidrio, barra que se agranda al pasar el mouse, portadita que se achica en pausa y barritas que bailan al lado de "Cumito".
-- Botones de vidrio con brillo, letra nueva (Manrope) y esquinas más redondas.
-- Al guardar en un disco, el corazón suelta puntitos 💕.
+- **El modo normal ahora es el diseño del lienzo, tal cual:** el vidrio borroso de verdad, los botones que crecen y se aprietan con rebote, la píldora de Buscar que se estira, las pestañas que se deslizan como gota, el fondo que se pasea, el inicio con manchas de color que respiran y Cumito que salta.
+- Todo está ahí: karaoke, Discos con sus vinilos, Wrapped, reacciones, la lista con arrastrar para ordenar, la rueda de Opciones con su "tic", Estado del servidor y Actividad.
+- **Modo streamer:** Opciones → Modo streamer pasa a la versión liviana de siempre (con el mini para OBS). Para volver al diseño normal, apágalo desde las opciones del modo streamer.
+- El modo normal usa un poco más de memoria; el modo streamer casi nada.
