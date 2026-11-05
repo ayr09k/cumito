@@ -455,7 +455,7 @@ class BotCore:
             "activity_last": self.activity[-1] if self.activity else None,
             # 2.0 (las apps viejas no los miran)
             "server_v": 2,
-            "features": self.FEATURES,
+            "features": self.FEATURES + (["solo"] if audio_cache.publishes() else []),
             "repeat": self.repeat,
             "radio": self.radio,
             "normalize": self.normalize,

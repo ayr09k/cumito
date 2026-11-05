@@ -69,6 +69,7 @@ class CumitoServer:
         # vuelven a leer este archivo al arrancar, y así no cargan Discord
         from cumito_bot.bot import BotCore
         from cumito_bot.salud import Salud
+        from cumito_bot.solo import Solo
         self.salud = Salud()
         self.relay = RelayServer(RELAY_PORT, on_command=self._on_relay_command)
         self.bot = BotCore(
@@ -77,10 +78,14 @@ class CumitoServer:
             cfg.get("host_display_name") or "Admin",
             on_change=self._on_change,
         )
+        self.solo = Solo(self.bot, self._on_change)
 
     def _on_change(self):
         snap = self.bot.snapshot()
         extra = {k: v for k, v in snap.items() if k not in ("host_label", "now_playing", "queue", "volume", "recent")}
+        solo = getattr(self, "solo", None)
+        if solo is not None:
+            extra["listening"] = solo.listing()   # modo solo: quién escucha qué en su celular
         asyncio.create_task(self.relay.broadcast_state(
             snap["host_label"], snap["now_playing"], snap["queue"],
             volume=snap.get("volume"), recent=snap.get("recent"), **extra,
@@ -163,6 +168,20 @@ class CumitoServer:
         except ValueError as e:   # p. ej. una imagen que no se pudo leer
             await self._reply(ws, "error", message=str(e)[:160], action=action)
 
+    async def _solo_command(self, action, data, ws):
+        try:
+            if action == "solo_get":
+                url = str(data.get("url") or "")
+                res = await self.solo.get(url, data.get("title"), pre=bool(data.get("pre")))
+                await self._reply(ws, "solo_ready", url=url, **res)
+            elif action == "solo_add":
+                res = await self.solo.add(str(data.get("query") or ""), bool(data.get("as_playlist")))
+                await self._reply(ws, "solo_tracks", now=bool(data.get("now")), **res)
+            elif action == "recs":
+                await self._reply(ws, "recs", tag=data.get("tag"), **await self.solo.recs(data.get("seeds") or []))
+        except Exception:
+            logging.getLogger("cumito.solo").exception("Modo solo: %s", action)
+
     async def _on_relay_command(self, data, sender_name, ws=None):
         bot = self.bot
         who = sender_name
@@ -170,6 +189,12 @@ class CumitoServer:
         if action == "play":
             await bot.action_play(data.get("query", ""), as_playlist=bool(data.get("as_playlist")),
                                   req=data.get("req"), who=who)
+        elif action in ("solo_get", "solo_add", "recs"):
+            # modo solo: pueden tardar unos segundos, así que van aparte para no
+            # frenar lo demás que mande ese mismo celular
+            asyncio.create_task(self._solo_command(action, data, ws))
+        elif action == "solo_status":
+            await self.solo.status(who, data)
         elif action == "playlist_preview":
             # responde solo a quien preguntó, como la búsqueda
             preview = await bot.action_playlist_preview(data.get("url", ""))
@@ -258,6 +283,7 @@ class CumitoServer:
 
     async def run(self):
         asyncio.create_task(self.salud.run())
+        asyncio.create_task(self.solo.sweep())
         from cumito_bot.lanes import LANES
         LANES.warm()
         await self.relay.start()

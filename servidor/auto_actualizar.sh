@@ -38,6 +38,20 @@ fi
 # 1b) la app del celular (si se activó con activar_movil.sh): siempre al día
 if [ -d /var/www/cumito ]; then
   cp -rT "$REPO_DIR/app/assets" /var/www/cumito
+  # modo solo: las canciones bajadas se publican en /audio para el celular
+  if [ ! -d /var/www/cumito/audio ]; then
+    install -d -m 755 -o "$DUENO" -g "$DUENO" /var/www/cumito/audio
+  fi
+  CF=/etc/caddy/Caddyfile
+  if [ -f "$CF" ] && ! grep -q "/audio/" "$CF"; then
+    NUEVO_CF="$(mktemp)"
+    awk '/^\troot \* /{print "\t@m4a path /audio/*.m4a"; print "\theader @m4a Content-Type audio/mp4"; print "\theader /audio/* Cache-Control \"public, max-age=604800\""} {print}' "$CF" > "$NUEVO_CF"
+    if caddy validate --adapter caddyfile --config "$NUEVO_CF" >/dev/null 2>&1; then
+      install -m 644 "$NUEVO_CF" "$CF"
+      systemctl reload caddy || true
+    fi
+    rm -f "$NUEVO_CF"
+  fi
 fi
 
 # 2) ¿qué cambió? (sin copiar nada todavía)

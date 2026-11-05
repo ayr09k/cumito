@@ -7,7 +7,7 @@
 /* ======================= puente con Python ======================= */
 let B = null;
 const Q = [];
-function send(action, kw) { if (B) B.send(action, JSON.stringify(kw || {})); else Q.push([action, kw]); }
+function send(action, kw) { if (window.SOLO && SOLO.intercept(action, kw || {})) return; if (B) B.send(action, JSON.stringify(kw || {})); else Q.push([action, kw]); }
 function winCmd(cmd) { if (B) B.win_cmd(cmd); }
 function save(key, val) { if (B) B.save(key, JSON.stringify(val)); }
 function doSearch(q, limit, offset, kind) { if (B) B.search(q, limit, offset, kind); }
@@ -55,6 +55,7 @@ const S = {
   lastReaction: null, firstState: true,
 };
 const feat = (f) => S.connected && (S.st.features || []).includes(f);
+const soloOn = () => !!(window.SOLO && SOLO.on);
 
 /* ======================= eventos de Python ======================= */
 function onEvent(type, json) {
@@ -69,7 +70,7 @@ const HANDLERS = {
     S.version = d.version || '';
     renderHome();
   },
-  connected(ok) { S.connected = !!ok; if (!ok) { S.st = Object.assign({}, S.st, { now_playing: null, queue: [] }); } renderAll(); },
+  connected(ok) { S.connected = !!ok; if (!ok) { S.group = Object.assign({}, S.group || S.st, { now_playing: null, queue: [] }); S.st = soloOn() ? SOLO.view() : S.group; } else if (window.SOLO) SOLO.onConnected(); renderAll(); },
   state(st) { applyState(st); },
   search_results(d) { onResults(d); },
   playlist_preview(d) { showPreview(d); },
@@ -83,6 +84,9 @@ const HANDLERS = {
   album_added(d) { onAlbumAdded(d); },
   error(d) { toast(d.message || 'Algo salió mal'); AL.saving = false; },
   update(d) { renderBanner(d); },
+  solo_ready(d) { if (window.SOLO) SOLO.onReady(d); },
+  solo_tracks(d) { if (window.SOLO) SOLO.onTracks(d); },
+  recs(d) { if (window.SOLO) SOLO.onRecs(d); },
   cover_picked(d) { if (d.b64) { AL.edit.cover = d.b64; AL.edit.remove = false; renderAlbums(); } else if (d.error) toast(d.error); },
 };
 
@@ -90,10 +94,13 @@ const HANDLERS = {
 function applyState(st) {
   const prev = S.st;
   const prevNp = prev.now_playing || {};
-  S.st = Object.assign({}, prev, st);
+  S.group = Object.assign({}, S.group || prev, st);
+  S.groupAt = performance.now();
+  S.st = soloOn() ? SOLO.view() : S.group;
   S.connected = true;
   const np = S.st.now_playing;
-  if (np) {
+  if (window.SOLO) SOLO.onGroup();
+  if (np && !soloOn()) {
     S.elapsed = +np.elapsed || 0; S.elapsedAt = performance.now();
   }
   renderAll(prevNp);
@@ -132,7 +139,10 @@ function applyState(st) {
 
 function renderAll(prevNp) {
   const np = S.connected ? S.st.now_playing : null;
-  cls('is-home', !np);
+  cls('is-home', !np || (soloOn() && SOLO.home));
+  cls('solo', soloOn());
+  cls('solo-home', soloOn() && SOLO.home && !!np);
+  cls('can-solo', MOBILE && S.connected && (S.group || S.st).features && ((S.group || S.st).features || []).includes('solo'));
   cls('has-now', !!np);
   cls('is-playing', !!np && !np.paused);
   cls('is-paused', !np || !!np.paused);
@@ -182,6 +192,7 @@ function renderNow(prevNp) {
   let artist = np.uploader || '';
   const who = np.radio ? 'la radio' : np.who;
   if (who && who !== S.me) artist = artist ? artist + ' · puso ' + who : 'puso ' + who;
+  if (np.with) artist = (artist ? artist + ' · ' : '') + 'escuchando con ' + np.with;
   $('artist').textContent = artist;
   $('it').textContent = title;
   $('ia').textContent = np.uploader || '';
@@ -306,11 +317,12 @@ function renderHome() {
   }
   // lo último que sonó
   const recent = S.st.recent || [];
-  const rsig = recent.map((r) => r.webpage_url).join('|');
+  const rsig = recent.map((r) => r.webpage_url).join('|') + soloOn();
+  $('hrecentT').textContent = soloOn() ? 'LO ÚLTIMO QUE ESCUCHASTE' : 'LO ÚLTIMO QUE SONÓ';
   if ($('recentCards').dataset.sig !== rsig) {
     $('recentCards').dataset.sig = rsig;
     $('recentCards').innerHTML = recent.map((r, i) =>
-      '<button class="card" type="button" style="width:112px" data-play="' + esc(r.webpage_url) + '" title="Ponerla otra vez">' +
+      '<button class="card" type="button" style="width:112px" data-play="' + esc(r.webpage_url) + '"' + (soloOn() ? ' data-now="1"' : '') + ' title="Ponerla otra vez">' +
       '<div class="cv" style="width:112px;height:112px;border-radius:18px;' + coverStyle(r.art_url, r.title) + ';box-shadow:0 12px 24px -12px rgba(0,0,0,.6)"><span class="playdot">' + I.play + '</span></div>' +
       '<div class="ell" style="font-size:12px;font-weight:800;margin-top:7px">' + esc(r.title) + '</div>' +
       '<div class="ell" style="font-size:10.5px;font-weight:600;color:rgba(244,242,250,.55)">' + esc(r.uploader || '') + '</div></button>').join('');
@@ -344,6 +356,7 @@ function renderHome() {
     $('homeAct').innerHTML = acts.map((a) => '<div class="actl"><span class="av" style="background:' + pcolor(a.who) + '">' + initial(a.who) + '</span><span class="ell"><b>' + esc(a.who) + '</b> ' + esc(a.text) + (a.title ? ': ' + esc(a.title) : '') + '</span></div>').join('');
   }
   $('pword').textContent = has('is-home') ? 'Buscar canción o pegar un link' : 'Buscar';
+  if (window.SOLO) SOLO.renderHome();
 }
 function plural(n, one, many) { n = n || 0; return n + ' ' + (n === 1 ? one : many); }
 function isLight(hex) { const c = parseInt(String(hex).slice(1), 16); const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255; return (0.299 * r + 0.587 * g + 0.114 * b) > 165; }
@@ -1487,12 +1500,14 @@ const ACT = {
   p2save: (b) => p2save(b.dataset.key), pvAdd: () => previewAccept(false), pvSingle: () => previewAccept(true), pvClose: () => { closePreview(); $('q').value = ''; SR.phase = 'home'; renderSearch(); },
   activity: openActivity, update: () => winCmd('update'), bannerClose: () => $('banner').classList.remove('on'),
   wrMine: () => { WR.mine = !WR.mine; loadWrapped(); },
+  solo: () => window.SOLO && SOLO.toggle(), soloHome: () => window.SOLO && SOLO.goHome(true), soloPlayer: () => window.SOLO && SOLO.goHome(false),
 };
 W.addEventListener('click', (e) => {
   const a = e.target.closest('[data-act]');
   if (a && W.contains(a) && !a.disabled) { const f = ACT[a.dataset.act]; if (f) { e.stopPropagation(); f(a); } return; }
   let t;
-  if ((t = e.target.closest('[data-play]'))) { send('play', { query: t.dataset.play }); toast('Agregando…'); if (has('is-search')) closeSearch(); return; }
+  if ((t = e.target.closest('[data-play]'))) { const now = !!t.dataset.now; send('play', { query: t.dataset.play, now: now }); if (!now) toast('Agregando…'); if (has('is-search')) closeSearch(); return; }
+  if ((t = e.target.closest('[data-follow]'))) { if (window.SOLO) SOLO.followToggle(t.dataset.follow); return; }
   if ((t = e.target.closest('[data-chip]'))) { $('q').value = t.dataset.chip; submitSearch(); return; }
   if ((t = e.target.closest('[data-sheart]'))) { const r = SR.results[+t.dataset.sheart]; if (r) pickFor({ tracks: [{ title: r.title, webpage_url: r.webpage_url, duration: r.duration, uploader: r.uploader, art_url: r.art_url }] }, r.title); return; }
   if ((t = e.target.closest('[data-tile]'))) { addTile(+t.dataset.tile); return; }

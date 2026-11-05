@@ -30,7 +30,9 @@ for _d in (
 
 
 YTDL_OPTS = {
-    "format": "bestaudio/best",
+    # m4a (AAC) primero: suena en Discord igual que el resto y además en
+    # cualquier celular (el iPhone no siempre abre webm/opus)
+    "format": "bestaudio[ext=m4a]/bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -113,6 +115,8 @@ def _extract_one(opts: dict, query: str) -> dict:
             "duration": info.get("duration"),
             "art_url": _best_thumb(info),
             "uploader": info.get("uploader") or info.get("channel"),
+            "ext": info.get("ext"),
+            "protocol": info.get("protocol"),
         }
 
 

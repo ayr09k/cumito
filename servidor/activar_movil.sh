@@ -36,6 +36,7 @@ for w in 500:Medium 600:SemiBold 700:Bold 800:ExtraBold; do
     "https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/latin-${w%%:*}-normal.ttf" || true
 done
 sudo chmod -R a+rX "$WEB"
+sudo install -d -m 755 -o "$DUENO" -g "$DUENO" "$WEB/audio"   # modo solo: canciones para el celular
 
 # 3) la configuración: la app en / y la conexión con Cumito en /ws
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDY
@@ -45,6 +46,9 @@ $HOST {
 	reverse_proxy @ws 127.0.0.1:8765
 	redir / /web/ 302
 	header /web/* Cache-Control "no-cache"
+	@m4a path /audio/*.m4a
+	header @m4a Content-Type audio/mp4
+	header /audio/* Cache-Control "public, max-age=604800"
 	root * $WEB
 	file_server
 }

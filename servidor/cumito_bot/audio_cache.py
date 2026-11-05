@@ -21,7 +21,19 @@ from pathlib import Path
 
 log = logging.getLogger("cumito.cache")
 
-DIR = Path(__file__).resolve().parent.parent / "cache_audio"
+import os
+import secrets
+
+_HERE = Path(__file__).resolve().parent.parent
+# Si el celular está activado (Caddy sirve /var/www/cumito), las canciones se
+# guardan en /var/www/cumito/audio: así el "Modo solo" del celular las baja de
+# https://.../audio/<archivo> sin que Python tenga que mandarlas. Si no, quedan
+# en la carpeta del servidor como siempre.
+WEB_DIR = Path("/var/www/cumito/audio")
+DIR = WEB_DIR if (WEB_DIR.is_dir() and os.access(WEB_DIR, os.W_OK)) else _HERE / "cache_audio"
+# los nombres de archivo llevan una sal secreta: sin ella nadie puede adivinar
+# la dirección de una canción a partir de su enlace de YouTube
+_SALT_PATH = _HERE / ".audio_sal"
 CHUNK = 4 << 20                 # 4 MB por pedido
 MAX_FILE = 200 << 20            # una sola canción de más de 200 MB no se baja (suena directo)
 MAX_TOTAL = 1536 << 20          # tope de todo el caché
@@ -29,29 +41,81 @@ _tasks: dict[str, asyncio.Task] = {}
 _bg = asyncio.Semaphore(1)      # en segundo plano, de a una
 
 
+_salt = None
+
+
+def _get_salt() -> str:
+    global _salt
+    if _salt is None:
+        try:
+            _salt = _SALT_PATH.read_text().strip()
+        except OSError:
+            _salt = ""
+        if not _salt:
+            _salt = secrets.token_hex(16)
+            try:
+                _SALT_PATH.write_text(_salt)
+            except OSError:
+                pass
+    return _salt
+
+
 def _key(track) -> str | None:
     url = track.get("webpage_url") or ""
-    return hashlib.sha1(url.encode()).hexdigest()[:20] if url else None
+    return hashlib.sha1((_get_salt() + url).encode()).hexdigest()[:24] if url else None
+
+
+def _ext(track) -> str:
+    e = str(track.get("ext") or "").lower()
+    return e if e in ("m4a", "mp4", "webm", "mp3", "opus", "ogg") else "audio"
+
+
+def public_src(path: Path | None) -> str | None:
+    """La dirección (relativa al sitio del celular) de una canción bajada, o
+    None si este servidor no las publica."""
+    if path is None or DIR != WEB_DIR:
+        return None
+    return "/audio/" + path.name
+
+
+def publishes() -> bool:
+    return DIR == WEB_DIR
 
 
 def _cacheable(track) -> bool:
     u = track.get("stream_url") or ""
     # los en vivo y los que vienen en "manifiesto" (m3u8 / dash) no son un archivo
-    return u.startswith("http") and "manifest" not in u and ".m3u8" not in u and not track.get("is_live")
+    return (u.startswith("http") and "manifest" not in u and ".m3u8" not in u and not track.get("is_live")
+            and str(track.get("protocol") or "https").startswith("http") and "m3u8" not in str(track.get("protocol")))
 
 
 def ready_path(track) -> Path | None:
     k = _key(track)
     if not k:
         return None
-    p = DIR / f"{k}.audio"
-    if p.exists():
+    for p in DIR.glob(k + ".*"):
+        if p.suffix == ".part":
+            continue
         try:
             p.touch()   # recién usada: la última en borrarse
         except OSError:
             pass
         return p
     return None
+
+
+def alias(url: str, path: Path):
+    """Que la misma canción también se encuentre por otro enlace (p. ej. el
+    "busca:artista - título" de Spotify): un segundo nombre, sin copiarla."""
+    k = _key({"webpage_url": url})
+    if not k or path is None:
+        return
+    try:
+        dest = DIR / f"{k}{path.suffix}"
+        if not dest.exists():
+            os.link(path, dest)
+    except OSError:
+        pass
 
 
 def _download(url: str, headers: dict, dest: Path):
@@ -85,12 +149,14 @@ def _download(url: str, headers: dict, dest: Path):
             pos += len(data)
             if whole or total is None:
                 total = pos
+    os.chmod(part, 0o644)   # que Caddy (otro usuario) la pueda leer
     part.replace(dest)
 
 
 def _prune():
     try:
-        files = sorted(DIR.glob("*.audio"), key=lambda p: p.stat().st_mtime)
+        files = sorted((p for p in DIR.glob("*.*") if p.suffix != ".part" and not p.name.startswith(".")),
+                       key=lambda p: p.stat().st_mtime)
         size = sum(p.stat().st_size for p in files)
         while files and size > MAX_TOTAL:
             p = files.pop(0)
@@ -129,7 +195,7 @@ async def fetch(track, urgent=False) -> Path | None:
             if ready_path(track):
                 return ready_path(track)
             DIR.mkdir(exist_ok=True)
-            dest = DIR / f"{k}.audio"
+            dest = DIR / f"{k}.{_ext(track)}"
             t0 = time.monotonic()
             try:
                 await asyncio.to_thread(_download, url, headers, dest)

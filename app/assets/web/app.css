@@ -556,3 +556,31 @@ html.mobile .qrow .grip{touch-action:none;padding:8px 6px}
   .th,.qrow .qx,.playdot{opacity:1!important;transform:none!important}
   .btn:hover,.card:hover,.tile:hover,.pill:hover,.pill2:hover{transform:none}
 }
+
+/* ======================= modo solo (celular) ======================= */
+.sb-home,.sb-solo{display:none}
+.can-solo .sb-solo{display:flex}
+.sb-solo{width:auto;padding:0 10px 0 8px;gap:5px}
+.sb-solo .sl{font-size:11px;font-weight:800;letter-spacing:.2px}
+.solo .sb-solo{background:rgba(142,108,242,.55);border-color:rgba(201,180,248,.7);box-shadow:0 0 18px -2px rgba(142,108,242,.75)}
+.solo.has-now:not(.is-home) .sb-home{display:flex}
+.is-sheet .sb-home,.is-panel .sb-home,.is-search .sb-home{display:none!important}
+.solo-home .mp{opacity:1;transform:none;pointer-events:auto;bottom:80px;cursor:pointer}
+html.mobile .solo-home .mp{bottom:calc(80px + var(--sb))}
+.solo-home.is-search .mp{bottom:12px}
+html.mobile .solo-home.is-search .mp{bottom:calc(12px + var(--sb))}
+html.mobile .solo-home .scroller{padding-bottom:calc(166px + var(--sb))}
+.lcard{flex:none;width:236px;display:flex;flex-direction:column;gap:10px;padding:10px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);text-align:left}
+.lcard .lt{display:flex;gap:10px;align-items:center;min-width:0}
+.lcard .lc{width:54px;height:54px;border-radius:14px;flex:none;background-size:cover;background-position:center;position:relative;box-shadow:0 10px 20px -10px rgba(0,0,0,.6)}
+.lcard .who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;min-width:0}
+.lcard .who .av{width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;flex:none}
+.lcard .who .live{width:6px;height:6px;border-radius:3px;background:#3DDC84;flex:none;animation:pulse 1.6s ease-in-out infinite}
+.lcard .who .live.off{background:rgba(255,255,255,.35);animation:none}
+.lcard .t{display:block;font-size:13px;font-weight:800;margin-top:3px}
+.lcard .a{display:block;font-size:10.5px;font-weight:600;color:rgba(244,242,250,.55)}
+.lcard .go{height:32px;border-radius:16px;background:rgba(142,108,242,.3);border:1px solid rgba(201,180,248,.5);color:#fff;font-size:11.5px;font-weight:800;gap:7px}
+.lcard .go.on{background:#8E6CF2;border-color:#C9B4F8;box-shadow:0 0 16px -2px rgba(142,108,242,.8)}
+.lcard .go .eqm{height:11px}
+.lcard .go .eqm i{background:#fff}
+.lcard.dc .who .av{background:#5865F2}
