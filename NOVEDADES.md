@@ -1,3 +1,3 @@
-## Cumito 1.8.2
+## Cumito 1.8.3
 
-- Al agarrar una canción para cambiarla de lugar, ya no se mueve también toda la ventana. La ventana se sigue moviendo como siempre desde las zonas vacías.
+- Modo streamer: si minimizas Cumito, se queda minimizado. Antes, a los pocos segundos volvía a aparecer solo el mini.
