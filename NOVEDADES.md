@@ -1,3 +1,7 @@
+## Cumito 2.2.2
+
+- Arreglado: en PCs con las animaciones de Windows reducidas, el fondo y el título se repetían rapidísimo y las opciones se movían a saltos.
+
 ## Cumito 2.2.1
 
 - La letra del diseño (Manrope) ahora también se ve en el modo streamer.

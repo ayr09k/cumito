@@ -504,4 +504,3 @@ body{width:360px;height:600px}
 /* sin conexión */
 .offline .members,.offline .homesec{display:none}
 
-@media (prefers-reduced-motion:reduce){.win *{animation-duration:.001s!important;transition-duration:.001s!important}}
