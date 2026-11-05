@@ -2262,6 +2262,9 @@ class GlassScreen(QWidget):
         if "prev" in f:
             self.btn_prev.setEnabled(bool(np) or bool(self.state.get("can_prev")))
             self.btn_prev.setToolTip("Atrás (si ya lleva un rato, vuelve al inicio)")
+        else:
+            self.btn_prev.setEnabled(False)
+            self.btn_prev.setToolTip("Sin historial hacia atrás por ahora")
         rep = self.state.get("repeat") or "off"
         self.btn_repeat.set_icon("repeat_one" if rep == "one" else "repeat")
         self.btn_repeat._icon_color = theme.GLASS_ACCENT if rep != "off" else "#FFFFFF"

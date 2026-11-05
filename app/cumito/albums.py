@@ -98,9 +98,9 @@ def _cover_fill(pix, w, h):
 def sleeve_pixmap(size: int, cover: QPixmap | None = None, color: str | None = None, arts=(),
                   name: str = "", spin: float = 0.0) -> QPixmap:
     """Funda cuadrada de `size` px con el vinilo asomando a la derecha.
-    El dibujo mide size*1.3 de ancho y size de alto."""
+    El dibujo mide size*1.33 de ancho y size de alto."""
     color = QColor(color or theme.GLASS_ACCENT)
-    W, H = int(size * 1.3), size
+    W, H = int(size * 1.33) + 1, size
     dpr = 2.0
     pix = QPixmap(int(W * dpr), int(H * dpr))
     pix.setDevicePixelRatio(dpr)
@@ -111,7 +111,7 @@ def sleeve_pixmap(size: int, cover: QPixmap | None = None, color: str | None = N
 
     # --- el vinilo (detrás) ---
     d = size * 0.94
-    cx, cy = size * 0.98, H / 2
+    cx, cy = size * 0.84, H / 2
     rec = QRectF(cx - d / 2, cy - d / 2, d, d)
     g = QRadialGradient(QPointF(cx, cy), d / 2)
     g.setColorAt(0.0, QColor(30, 28, 36))
@@ -262,7 +262,7 @@ class AlbumTile(_Clickable):
         self._size = size
         self._hover = False
         self.setAttribute(Qt.WA_Hover, True)
-        self.setFixedSize(int(size * 1.3), size + 40)
+        self.setFixedSize(int(size * 1.33) + 1, size + 40)
         self._pix = pix
         self.name = album.get("name") or "Disco"
         n = album.get("count", 0)
@@ -311,7 +311,7 @@ class _NewTile(_Clickable):
     def __init__(self, size, parent=None):
         super().__init__(parent)
         self._size = size
-        self.setFixedSize(int(size * 1.3), size + 40)
+        self.setFixedSize(int(size * 1.33) + 1, size + 40)
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -850,7 +850,7 @@ class AlbumPicker(QWidget):
             rl.setSpacing(10)
             th = QLabel()
             th.setPixmap(sleeve_fn(a, 38))
-            th.setFixedSize(50, 38)
+            th.setFixedSize(52, 38)
             rl.addWidget(th)
             col = QVBoxLayout()
             col.setSpacing(0)
@@ -910,7 +910,7 @@ class Toast(QLabel):
         self.setText(text)
         self.setFixedWidth(min(pw.width() - 40, max(160, self.fontMetrics().horizontalAdvance(text) + 40)))
         self.adjustSize()
-        self.move((pw.width() - self.width()) // 2, pw.height() - self.height() - 84)
+        self.move((pw.width() - self.width()) // 2, pw.height() - self.height() - 236)
         self.show()
         self.raise_()
         self._t.start(ms)

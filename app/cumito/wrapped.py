@@ -108,7 +108,7 @@ class _Hours(QWidget):
         p.setFont(f)
         p.setPen(QColor(242, 240, 247, 110))
         for i, t in ((0, "12a"), (6, "6a"), (12, "12p"), (18, "6p")):
-            p.drawText(QRectF(i * w - 4, bh + 3, 30, 12), Qt.AlignLeft, t)
+            p.drawText(QRectF(max(0.0, i * w), bh + 3, 30, 12), Qt.AlignLeft, t)
         p.end()
 
 
