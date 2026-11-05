@@ -80,11 +80,88 @@ class CumitoServer:
 
     def _on_change(self):
         snap = self.bot.snapshot()
+        extra = {k: v for k, v in snap.items() if k not in ("host_label", "now_playing", "queue", "volume", "recent")}
         asyncio.create_task(self.relay.broadcast_state(
             snap["host_label"], snap["now_playing"], snap["queue"],
-            volume=snap.get("volume"), recent=snap.get("recent"),
-            activity_last=snap.get("activity_last"),
+            volume=snap.get("volume"), recent=snap.get("recent"), **extra,
         ))
+
+    @staticmethod
+    async def _reply(ws, type_, **data):
+        """Respuesta solo para quien preguntó (las apps viejas nunca piden
+        estas cosas, así que nunca les llega un tipo que no conocen)."""
+        if ws is None:
+            return
+        try:
+            await ws.send(protocol.dumps(type_, **data))
+        except Exception:
+            pass
+
+    async def _albums_changed(self, ws, album=None):
+        # a todos: cambia "albums_rev" en el estado y las apps nuevas vuelven a pedir la lista
+        self._on_change()
+        if album is not None:
+            await self._reply(ws, "album", album=album)
+
+    async def _album_command(self, action, data, who, ws):
+        bot, db = self.bot, self.bot.db
+        aid = data.get("id")
+        try:
+            aid = int(aid) if aid is not None else None
+        except (TypeError, ValueError):
+            aid = None
+        try:
+            if action == "album_list":
+                await self._reply(ws, "albums", albums=await db.run(db.albums), rev=db.albums_rev)
+            elif action == "album_get":
+                await self._reply(ws, "album", album=await db.run(db.album, aid), id=aid)
+            elif action == "album_cover":
+                h = str(data.get("cover") or "")
+                await self._reply(ws, "album_cover", cover=h, data=await db.run(db.cover, h))
+            elif action == "album_create":
+                alb = await db.run(db.album_create, data.get("name", ""), who, data.get("color"),
+                                   data.get("cover_b64"), data.get("note"))
+                bot.log_activity(who, "album_new", f"creó el disco «{alb['name']}»", title=alb["name"])
+                await self._albums_changed(ws, alb)
+            elif action == "album_update":
+                alb = await db.run(db.album_update, aid, data.get("name"), data.get("color"),
+                                   data.get("cover_b64"), bool(data.get("remove_cover")), data.get("note"))
+                if alb:
+                    await self._albums_changed(ws, alb)
+            elif action == "album_delete":
+                name = await db.run(db.album_delete, aid)
+                if name:
+                    bot.log_activity(who, "album_del", f"borró el disco «{name}»", title=name)
+                    await self._albums_changed(ws)
+            elif action == "album_add":
+                if data.get("current") or data.get("uid") is not None:
+                    t = bot.track_for_album("current" if data.get("current") else "queue", data.get("uid"))
+                    tracks = [t] if t else []
+                else:
+                    tracks = [t for t in (data.get("tracks") or []) if isinstance(t, dict)][:200]
+                n = await db.run(db.album_add, aid, tracks, who)
+                alb = await db.run(db.album, aid) if aid is not None else None
+                if n and alb:
+                    what = f"«{tracks[0].get('title')}»" if n == 1 else f"{n} canciones"
+                    bot.log_activity(who, "album_add", f"guardó {what} en el disco «{alb['name']}»",
+                                     title=tracks[0].get("title") if n == 1 else alb["name"],
+                                     sub=tracks[0].get("uploader") if n == 1 else None,
+                                     art=tracks[0].get("art_url") if n == 1 else None)
+                await self._reply(ws, "album_added", id=aid, added=n)
+                if n:
+                    await self._albums_changed(ws, alb)
+            elif action == "album_remove":
+                if await db.run(db.album_remove, aid, int(data.get("track_id", -1))):
+                    await self._albums_changed(ws, await db.run(db.album, aid))
+            elif action == "album_move":
+                if await db.run(db.album_move, aid, int(data.get("track_id", -1)), int(data.get("to", 0))):
+                    await self._albums_changed(ws, await db.run(db.album, aid))
+            elif action == "album_play":
+                err = await bot.album_play(aid, shuffle=bool(data.get("shuffle")), who=who)
+                if err:
+                    await self._reply(ws, "error", message=err)
+        except ValueError as e:   # p. ej. una imagen que no se pudo leer
+            await self._reply(ws, "error", message=str(e)[:160], action=action)
 
     async def _on_relay_command(self, data, sender_name, ws=None):
         bot = self.bot
@@ -123,11 +200,7 @@ class CumitoServer:
             await bot.action_play_index(int(data.get("index", -1)), uid=data.get("uid"), who=who)
         elif action == "status":
             # la salud de la VM, solo para quien la pidió (Opciones -> Estado del servidor)
-            if ws is not None:
-                try:
-                    await ws.send(protocol.dumps("status", **self.salud.snapshot(bot, self.relay)))
-                except Exception:
-                    pass
+            await self._reply(ws, "status", **self.salud.snapshot(bot, self.relay))
         elif action == "activity_list":
             # el historial completo, solo para quien lo pidió (Ajustes > Actividad)
             if ws is not None:
@@ -135,6 +208,37 @@ class CumitoServer:
                     await ws.send(protocol.dumps("activity_list", entries=bot.activity_list()))
                 except Exception:
                     pass
+        elif action == "prev":
+            await bot.action_prev(who=who)
+        elif action == "seek":
+            await bot.action_seek(data.get("pos", 0), who=who)
+        elif action == "set_repeat":
+            await bot.action_set_repeat(str(data.get("mode", "off")), who=who)
+        elif action == "shuffle":
+            await bot.action_shuffle(who=who)
+        elif action == "set_radio":
+            await bot.action_set_radio(bool(data.get("on")), who=who)
+        elif action == "set_normalize":
+            await bot.action_set_normalize(bool(data.get("on")), who=who)
+        elif action == "sleep":
+            await bot.action_sleep(data.get("minutes"), end_of_track=bool(data.get("end_of_track")), who=who)
+        elif action == "react":
+            bot.action_react(data.get("emoji"), who=who)
+        elif action == "lyrics":
+            # la de la canción que suena (o la que se pida), solo para quien la pidió
+            track = bot.current if not data.get("webpage_url") else {
+                "webpage_url": data.get("webpage_url"), "title": data.get("title") or "",
+                "uploader": data.get("uploader"), "duration": data.get("duration")}
+            if track:
+                await self._reply(ws, "lyrics", **await bot.lyrics_for(track))
+            else:
+                await self._reply(ws, "lyrics", found=False, key=None, webpage_url=None)
+        elif action == "stats":
+            period = str(data.get("period") or "month")
+            mine = data.get("who") if data.get("who") else None
+            await self._reply(ws, "stats", **await bot.db.run(bot.db.stats, period, mine))
+        elif isinstance(action, str) and action.startswith("album_"):
+            await self._album_command(action, data, who, ws)
         elif action == "prepare":
             await bot.action_prepare(int(data.get("index", -1)), uid=data.get("uid"))
         elif action == "search":

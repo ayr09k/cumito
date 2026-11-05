@@ -173,6 +173,16 @@ class Salud:
             "playing": (bot.current or {}).get("title"),
             "versions": {"server": version, "yt_dlp": ytv},
             "update_pending": pend.exists(),
+            "lanes": _lanes(),
+            "db_size": bot.db.size() if getattr(bot, "db", None) else None,
             "logs": list(self.logs.items)[-40:],
             "time": time.time(),
         }
+
+
+def _lanes():
+    try:
+        from .lanes import LANES
+        return LANES.snapshot()
+    except Exception:
+        return None

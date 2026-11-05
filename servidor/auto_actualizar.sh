@@ -10,7 +10,8 @@
 # igual: Cumito anota en qué segundo iba y lo retoma solo tras reiniciar.
 #
 # Nunca toca config.json, cookies.txt, history.json, session.json,
-# activity.json ni el .venv: eso vive solo en la VM.
+# activity.json, cumito.db (Discos, estadísticas, letras), portadas/ ni el
+# .venv: eso vive solo en la VM.
 # Una vez al día también pone al día yt-dlp (con la misma regla de no cortar).
 set -euo pipefail
 CARPETA="${CUMITO_CARPETA:?}"
@@ -40,9 +41,9 @@ sincronizar() {  # $1 = "ver" (solo listar) o "copiar"
 import filecmp, os, shutil, sys
 src, dst, modo = sys.argv[1], sys.argv[2], sys.argv[3]
 NUNCA = {"config.json", "cookies.txt", "history.json", "session.json", "activity.json",
-         "ffmpeg.log", ".ytdlp_dia", ".actualizacion_pendiente", ".version", ".forzar", ".forzado"}
+         "cumito.db", "cumito.db-wal", "cumito.db-shm", "ffmpeg.log", ".ytdlp_dia", ".actualizacion_pendiente", ".version", ".forzar", ".forzado"}
 for root, dirs, files in os.walk(src):
-    dirs[:] = [d for d in dirs if d not in (".venv", "__pycache__")]
+    dirs[:] = [d for d in dirs if d not in (".venv", "__pycache__", "portadas")]
     rel = os.path.relpath(root, src)
     for f in files:
         if f in NUNCA or f.endswith(".pyc"):

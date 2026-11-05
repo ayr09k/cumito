@@ -8,3 +8,5 @@ websockets>=12
 ytmusicapi>=1.8
 imageio-ffmpeg
 certifi
+# portadas de los Discos (se achican a 512 px antes de guardarlas)
+pillow

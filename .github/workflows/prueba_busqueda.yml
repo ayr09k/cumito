@@ -19,6 +19,7 @@ jobs:
           pip install -q -r servidor/requirements.txt
           mkdir -p /tmp/res
           python pruebas/busqueda.py /tmp/res/busqueda.json || echo "fallo" > /tmp/res/FALLO.txt
+          python pruebas/servidor2.py /tmp/res/servidor2.json || echo "fallo" > /tmp/res/FALLO2.txt
       - name: Guardar en la rama pruebas
         run: |
           cd /tmp/res

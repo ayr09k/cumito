@@ -26,7 +26,9 @@ class RelayServer:
         }
 
     async def start(self):
-        self._server = await websockets.serve(self._handle, "0.0.0.0", self.port, ping_interval=20)
+        # max_size: las portadas de los Discos viajan como imagen (hasta ~6 MB)
+        self._server = await websockets.serve(self._handle, "0.0.0.0", self.port, ping_interval=20,
+                                              max_size=8 * 1024 * 1024)
         log.info("Relay escuchando en el puerto %s", self.port)
 
     async def stop(self):

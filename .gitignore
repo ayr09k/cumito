@@ -13,4 +13,7 @@ history.json
 ffmpeg.log
 session.json
 activity.json
+cumito.db
+cumito.db-*
+portadas/
 *.tmp
