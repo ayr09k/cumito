@@ -43,11 +43,20 @@ class ArtCache(QObject):
             return None
         return self._cache.get(url)
 
+    def put(self, key: str, img: QImage):
+        """Guardar una imagen que no vino de internet (p. ej. la portada de un
+        Disco, que manda el servidor)."""
+        pix = QPixmap.fromImage(img)
+        if not pix.isNull():
+            self._cache[key] = pix
+            self.loaded.emit(key, pix)
+
     def request(self, url: str | None):
         """Pide que se cargue una portada. Si ya está en caché no hace nada
         (set_state puede llamarla cada vez que llega un estado nuevo, sin
         preocuparse por pedir de más)."""
-        if not url or url in self._cache or url in self._pending or requests is None:
+        if (not url or url in self._cache or url in self._pending or requests is None
+                or not url.startswith(("http://", "https://"))):
             return
         self._pending.add(url)
         threading.Thread(target=self._fetch, args=(url,), daemon=True).start()

@@ -48,6 +48,10 @@ from .mini import CHROMAS, SHAPE_NAMES, MiniWindow
 from .dim_editor import DimEditor
 from .queue_list import QueueList
 from .status_view import StatusView
+from .albums import AlbumPicker, AlbumsView, Toast, cover_key, sleeve_pixmap
+from .lyrics_view import LyricsView
+from .reactions import ReactionBar, float_reaction
+from .wrapped import WrappedView
 
 W, H = theme.GLASS_WINDOW_W, theme.GLASS_WINDOW_H
 SHEET_H = int(H * 0.74)
@@ -91,6 +95,55 @@ def _rounded(pix: QPixmap, radius: int) -> QPixmap:
     return out
 
 
+_STARS = None
+
+
+def _star_tile() -> QPixmap:
+    """El patrón de "espacio" de Cumito: puntitos de estrellas, uno que otro
+    destello y una lunita. Se dibuja UNA vez y después solo se repite."""
+    global _STARS
+    if _STARS is not None:
+        return _STARS
+    import random
+    rnd = random.Random(7)
+    S = 420
+    pix = QPixmap(S, S)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    for _ in range(46):
+        x, y = rnd.uniform(0, S), rnd.uniform(0, S)
+        r = rnd.choice((0.7, 0.8, 0.9, 1.0, 1.2, 1.5))
+        p.setBrush(QColor(255, 255, 255, rnd.randint(70, 190)))
+        p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
+    for x, y, r in ((78, 64, 5.0), (306, 150, 4.0), (190, 318, 4.6), (372, 372, 3.4)):
+        path = QPainterPath()
+        path.moveTo(x, y - r)
+        path.quadTo(x, y, x + r, y)
+        path.quadTo(x, y, x, y + r)
+        path.quadTo(x, y, x - r, y)
+        path.quadTo(x, y, x, y - r)
+        p.setBrush(QColor(255, 255, 255, 170))
+        p.drawPath(path)
+    moon = QPainterPath()
+    moon.addEllipse(QRectF(244, 52, 13, 13))
+    cut = QPainterPath()
+    cut.addEllipse(QRectF(248, 49, 13, 13))
+    p.setBrush(QColor(255, 236, 190, 150))
+    p.drawPath(moon.subtracted(cut))
+    p.end()
+    _STARS = pix
+    return pix
+
+
+def _paint_stars(p: QPainter, rect, opacity=0.42):
+    p.save()
+    p.setOpacity(opacity)
+    p.drawTiledPixmap(rect, _star_tile())
+    p.restore()
+
+
 def _placeholder_art(w, h) -> QPixmap:
     """Degradado morado/celeste/rosado, antes de que haya portada real."""
     pix = QPixmap(w, h)
@@ -112,6 +165,7 @@ def _placeholder_art(w, h) -> QPixmap:
     r3.setColorAt(0, QColor(209, 81, 122, 70))
     r3.setColorAt(1, QColor(209, 81, 122, 0))
     p.fillRect(pix.rect(), r3)
+    _paint_stars(p, pix.rect(), 0.5)
     p.end()
     return pix
 
@@ -258,25 +312,86 @@ class _GlassSwitch(QWidget):
 
 
 class _ProgressBar(QWidget):
+    """La barra de la canción. Si el servidor sabe adelantar (2.0), se puede
+    tocar o arrastrar: mientras se arrastra se ve el punto y el tiempo, y al
+    soltar se manda el salto."""
+
+    scrub = Signal(float)      # arrastrando (0..1)
+    seek_to = Signal(float)    # soltó (0..1)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(4)
+        self.setFixedHeight(14)
         self._frac = 0.0
+        self._drag = None
+        self._hover = False
+        self.seekable = False
+        self.setAttribute(Qt.WA_Hover, True)
+
+    def set_seekable(self, on):
+        on = bool(on)
+        if on != self.seekable:
+            self.seekable = on
+            self.setCursor(Qt.PointingHandCursor if on else Qt.ArrowCursor)
+            self.update()
 
     def setFraction(self, f):
         self._frac = max(0.0, min(1.0, f))
+        if self._drag is None:
+            self.update()
+
+    def _f_at(self, x):
+        return max(0.0, min(1.0, x / max(1, self.width())))
+
+    def enterEvent(self, ev):
+        self._hover = True
         self.update()
+
+    def leaveEvent(self, ev):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if self.seekable and ev.button() == Qt.LeftButton:
+            self._drag = self._f_at(ev.position().x())
+            self.scrub.emit(self._drag)
+            self.update()
+        ev.accept()   # tocar la barra nunca arrastra la ventana
+
+    def mouseMoveEvent(self, ev):
+        if self._drag is not None:
+            self._drag = self._f_at(ev.position().x())
+            self.scrub.emit(self._drag)
+            self.update()
+        ev.accept()
+
+    def mouseReleaseEvent(self, ev):
+        if self._drag is not None:
+            f = self._drag
+            self._frac = f
+            self._drag = None
+            self.seek_to.emit(f)
+            self.update()
+        ev.accept()
 
     def paintEvent(self, ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setPen(Qt.NoPen)
+        active = self.seekable and (self._hover or self._drag is not None)
+        th = 6 if active else 4
+        y = (self.height() - th) / 2
         p.setBrush(QColor(255, 255, 255, 55))
-        p.drawRoundedRect(self.rect(), 2, 2)
-        if self._frac > 0:
-            w = max(4, int(self.width() * self._frac))
+        p.drawRoundedRect(QRectF(0, y, self.width(), th), th / 2, th / 2)
+        f = self._drag if self._drag is not None else self._frac
+        if f > 0:
+            w = max(th, self.width() * f)
             p.setBrush(QColor("#ffffff"))
-            p.drawRoundedRect(0, 0, w, self.height(), 2, 2)
+            p.drawRoundedRect(QRectF(0, y, w, th), th / 2, th / 2)
+        if active:
+            x = self.width() * f
+            p.setBrush(QColor("#ffffff"))
+            p.drawEllipse(QRectF(x - 6, self.height() / 2 - 6, 12, 12))
 
 
 class _Equalizer(QWidget):
@@ -990,8 +1105,9 @@ class _GlassPanel(QWidget):
     encima un velo oscuro para que todo se lea. Con el switch de glass
     apagado, es un fondo sólido."""
 
-    def __init__(self, screen, top_radius=0, tint_alpha=150, parent=None):
+    def __init__(self, screen, top_radius=0, tint_alpha=150, parent=None, stars=False):
         super().__init__(parent or screen)
+        self._stars = stars
         self._screen = screen
         self._radius = top_radius
         self._tint_alpha = tint_alpha
@@ -1027,12 +1143,16 @@ class _GlassPanel(QWidget):
             p.drawPixmap(QRectF(0, 0, self.width(), self.height()), blur,
                          QRectF(self.x(), self.y(), self.width(), self.height()))
             p.fillPath(path, QColor(14, 13, 20, self._tint_alpha))
+            if self._stars:
+                _paint_stars(p, self.rect(), 0.30)
             # un filo de luz arriba, como el borde de un vidrio
             p.setClipping(False)
             p.setPen(QPen(QColor(255, 255, 255, 46), 1))
             p.drawPath(path)
         else:
             p.fillPath(path, QColor(theme.FLAT_PANEL_BG))
+            if self._stars:
+                _paint_stars(p, self.rect(), 0.30)
         p.end()
 
 
@@ -1080,7 +1200,13 @@ class GlassScreen(QWidget):
         self._last_option = "activity"   # la rueda de opciones abre donde quedó
         # opciones visuales (main.py las guarda): modo streamer, forma del mini, fondo para OBS
         self.visual = {"streamer": False, "mini_shape": "cuadrado", "chroma": "", "mini_dim": 0.15,
-                       "mini_dim_set": False, "glass": True}
+                       "mini_dim_set": False, "glass": True, "media_keys": True, "presence": True}
+        # 2.0
+        self._albums_cache = []          # la última lista de Discos que llegó
+        self._albums_rev = None
+        self._last_reaction = None       # id de la última reacción vista
+        self._lyrics_for = None          # de qué canción es la letra que se ve
+        self._lyrics_retry = 0
         self.ui_scale = 1.0              # tamaño de toda la ventana (main.py lo aplica al abrir)
         self.mini = None                 # la ventanita del modo mini (si se abrió)
         self._now_art = None
@@ -1151,6 +1277,10 @@ class GlassScreen(QWidget):
 
     def settings_rows(self):
         return []
+
+    def my_name(self):
+        """main.py lo sobreescribe: el nombre con el que me ven."""
+        return None
 
     def on_settings_row(self, label):
         pass
@@ -1254,6 +1384,9 @@ class GlassScreen(QWidget):
 
         self.search_pill = _Pill("  Buscar", icon_name="search")
         self.search_pill.clicked.connect(self._open_search)
+        self.discos_pill = _Pill("  Discos", icon_name="disc")
+        self.discos_pill.clicked.connect(self.open_albums)
+        self.discos_pill.hide()
         # modo streamer: al lado de Buscar, el botón para pasar al mini
         self.mini_pill = _Pill("  Mini", icon_name="mini")
         self.mini_pill.clicked.connect(self.enter_mini)
@@ -1261,11 +1394,13 @@ class GlassScreen(QWidget):
         pill_row = QHBoxLayout()
         pill_row.setSpacing(8)
         pill_row.addWidget(self.search_pill)
+        pill_row.addWidget(self.discos_pill)
         pill_row.addWidget(self.mini_pill)
         pill_row.addStretch()
         tlay.addLayout(pill_row)
 
-        self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill, self.mini_pill]
+        self._chrome_widgets += [self.btn_options, self.btn_minimize, self.btn_close, self.search_pill,
+                                 self.discos_pill, self.mini_pill]
 
         # ---- overlay inferior: ahora sonando ----
         self.now_overlay = QWidget(self)
@@ -1297,6 +1432,19 @@ class GlassScreen(QWidget):
         mini_info.addWidget(self.now_title)
         mini_info.addWidget(self.now_artist)
         mini_row.addLayout(mini_info, 1)
+        # 2.0: reaccionar, guardar en un Disco, karaoke (se ven si el servidor los tiene)
+        self.btn_react = _IconButton("smile", size=32, icon_size=18, icon_color="#FFFFFF")
+        self.btn_react.setToolTip("Reaccionar")
+        self.btn_react.clicked.connect(self._toggle_reactions)
+        self.btn_heart = _IconButton("heart", size=32, icon_size=18, icon_color="#FFFFFF")
+        self.btn_heart.setToolTip("Guardar en un disco")
+        self.btn_heart.clicked.connect(self._open_picker)
+        self.btn_lyrics = _IconButton("lyrics", size=32, icon_size=18, icon_color="#FFFFFF")
+        self.btn_lyrics.setToolTip("Letra (karaoke)")
+        self.btn_lyrics.clicked.connect(self.open_lyrics)
+        for b in (self.btn_react, self.btn_heart, self.btn_lyrics):
+            b.hide()
+            mini_row.addWidget(b)
         nlay.addLayout(mini_row)
 
         prog_row = QHBoxLayout()
@@ -1304,6 +1452,8 @@ class GlassScreen(QWidget):
         self.time_elapsed = QLabel("0:00")
         self.time_elapsed.setStyleSheet("color: rgba(255,255,255,0.55); font-size:10px; background:transparent;")
         self.progress = _ProgressBar()
+        self.progress.scrub.connect(self._on_scrub)
+        self.progress.seek_to.connect(self._on_seek_bar)
         self.time_total = QLabel("0:00")
         self.time_total.setStyleSheet("color: rgba(255,255,255,0.55); font-size:10px; background:transparent;")
         prog_row.addWidget(self.time_elapsed)
@@ -1314,9 +1464,15 @@ class GlassScreen(QWidget):
         transport = QHBoxLayout()
         transport.setSpacing(30)
         transport.addStretch()
+        self.btn_shuffle = _IconButton("shuffle", size=32, icon_size=17, icon_color="#FFFFFF")
+        self.btn_shuffle.setToolTip("Mezclar la lista")
+        self.btn_shuffle.clicked.connect(self._on_shuffle)
+        self.btn_shuffle.hide()
+        transport.addWidget(self.btn_shuffle)
         self.btn_prev = _IconButton("prev", size=36, icon_size=20, icon_color="#FFFFFF")
         self.btn_prev.setEnabled(False)
         self.btn_prev.setToolTip("Sin historial hacia atrás por ahora")
+        self.btn_prev.clicked.connect(lambda: self.send_command("prev"))
         transport.addWidget(self.btn_prev)
         self.btn_play = _IconButton("play", size=48, icon_size=20, icon_color="#FFFFFF")
         self.btn_play.clicked.connect(self._on_play_pause)
@@ -1324,13 +1480,20 @@ class GlassScreen(QWidget):
         self.btn_next = _IconButton("next", size=36, icon_size=20, icon_color="#FFFFFF")
         self.btn_next.clicked.connect(lambda: self.send_command("skip"))
         transport.addWidget(self.btn_next)
+        self.btn_repeat = _IconButton("repeat", size=32, icon_size=17, icon_color="#FFFFFF")
+        self.btn_repeat.setToolTip("Repetir")
+        self.btn_repeat.clicked.connect(self._on_repeat)
+        self.btn_repeat.hide()
+        transport.addWidget(self.btn_repeat)
         transport.addStretch()
         nlay.addLayout(transport)
+        self._transport = transport
 
         # atrás / siguiente: solo el ícono, sin círculo. Play/pausa: un
         # círculo de vidrio ("liquid"): medio transparente, con borde y un
         # brillo arriba, nada de blanco sólido.
-        for b in (self.btn_prev, self.btn_next):
+        for b in (self.btn_prev, self.btn_next, self.btn_shuffle, self.btn_repeat, self.btn_react, self.btn_heart,
+                  self.btn_lyrics):
             b.setStyleSheet(
                 "QPushButton { background: transparent; border:none; border-radius: 18px; }"
                 "QPushButton:hover { background: rgba(255,255,255,0.10); }"
@@ -1501,7 +1664,7 @@ class GlassScreen(QWidget):
 
         # ---- buscador: hoja de vidrio que sube desde abajo ----
         # (deja visible la fila de arriba: cerrar, minimizar, etc.)
-        self.search_view = _GlassPanel(self, top_radius=22, tint_alpha=165)
+        self.search_view = _GlassPanel(self, top_radius=22, tint_alpha=165, stars=True)
         self.search_view.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
         self.search_view.hide()
         qlay = QVBoxLayout(self.search_view)
@@ -1678,7 +1841,7 @@ class GlassScreen(QWidget):
         self._search_count = 0
 
         # ---- ajustes: también una hoja que sube desde abajo ----
-        self.settings_view = _GlassPanel(self, top_radius=22, tint_alpha=165)
+        self.settings_view = _GlassPanel(self, top_radius=22, tint_alpha=165, stars=True)
         self.settings_view.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
         self.settings_view.hide()
         stlay = QVBoxLayout(self.settings_view)
@@ -1778,6 +1941,69 @@ class GlassScreen(QWidget):
         self._status_timer.timeout.connect(self._status_tick)
         self._status_last = 0.0
 
+        # ---- 2.0: karaoke ----
+        self.lyrics_panel = _GlassPanel(self, top_radius=22, tint_alpha=120)
+        self.lyrics_panel.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        self.lyrics_panel.hide()
+        lyl = QVBoxLayout(self.lyrics_panel)
+        lyl.setContentsMargins(14, 8, 8, 0)
+        lyl.setSpacing(4)
+        lyl.addLayout(self._handle_row())
+        lyh = QHBoxLayout()
+        lyh.setSpacing(10)
+        self.btn_lyrics_back = _IconButton("back", size=30)
+        self.btn_lyrics_back.clicked.connect(self._close_lyrics)
+        self._chrome_widgets.append(self.btn_lyrics_back)
+        lyh.addWidget(self.btn_lyrics_back)
+        lyt = QVBoxLayout()
+        lyt.setSpacing(0)
+        self.lyrics_title = _ElidedLabel("Letra")
+        self.lyrics_title.setStyleSheet("color:#fff; font-size:15px; font-weight:800; background:transparent;")
+        self.lyrics_sub = _ElidedLabel("")
+        self.lyrics_sub.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:10.5px; background:transparent;")
+        lyt.addWidget(self.lyrics_title)
+        lyt.addWidget(self.lyrics_sub)
+        lyh.addLayout(lyt, 1)
+        lyh.addSpacing(6)
+        lyl.addLayout(lyh)
+        self.lyrics_view = LyricsView()
+        self.lyrics_view.seek.connect(self._seek_seconds)
+        lyl.addWidget(self.lyrics_view, 1)
+        self.lyrics_credit = QLabel("Letras: LRCLIB · toca una línea para ir ahí")
+        self.lyrics_credit.setAlignment(Qt.AlignCenter)
+        self.lyrics_credit.setStyleSheet(f"color:{theme.GLASS_TEXT_MUTE2}; font-size:9.5px; background:transparent;"
+                                         " padding-bottom: 8px;")
+        lyl.addWidget(self.lyrics_credit)
+        self._lyrics_tick = QTimer(self)
+        self._lyrics_tick.setSingleShot(True)
+        self._lyrics_tick.timeout.connect(self._request_lyrics)
+
+        # ---- 2.0: Discos ----
+        self.albums_panel = _GlassPanel(self, top_radius=22, tint_alpha=170, stars=True)
+        self.albums_panel.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        self.albums_panel.hide()
+        abl = QVBoxLayout(self.albums_panel)
+        abl.setContentsMargins(14, 8, 10, 0)
+        abl.setSpacing(4)
+        abl.addLayout(self._handle_row())
+        self.albums_view = AlbumsView(lambda a, **kw: self.send_command(a, **kw), self.art_cache, _bare_scroll)
+        self.albums_view.closed.connect(self._close_albums)
+        self.albums_view.toast.connect(lambda t: self.toast.show_text(t))
+        abl.addWidget(self.albums_view, 1)
+
+        # ---- 2.0: Wrapped ----
+        self.wrapped_panel = _GlassPanel(self, top_radius=22, tint_alpha=170, stars=True)
+        self.wrapped_panel.setGeometry(0, PANEL_TOP, W, H - PANEL_TOP)
+        self.wrapped_panel.hide()
+        wl = QVBoxLayout(self.wrapped_panel)
+        wl.setContentsMargins(14, 8, 10, 0)
+        wl.setSpacing(4)
+        wl.addLayout(self._handle_row())
+        self.wrapped_view = WrappedView(lambda a, **kw: self.send_command(a, **kw), self.art_cache, _bare_scroll,
+                                        my_name=self.my_name)
+        self.wrapped_view.closed.connect(self._close_wrapped)
+        wl.addWidget(self.wrapped_view, 1)
+
         # ---- mini-reproductor (durante el buscador) ----
         self.mini_player = _GlassPanel(self, tint_alpha=175)
         self.mini_player.setGeometry(0, H - 58, W, 58)
@@ -1805,7 +2031,8 @@ class GlassScreen(QWidget):
         )
 
         self._chrome_widgets += [self.playlist_sheet, self.search_view, self.settings_view, self.activity_view,
-                                 self.status_panel, self.mini_player]
+                                 self.status_panel, self.mini_player, self.lyrics_panel, self.albums_panel,
+                                 self.wrapped_panel]
 
         # ---- aviso de actualización (baja desde arriba como notificación) ----
         self._build_update_banner()
@@ -1815,6 +2042,14 @@ class GlassScreen(QWidget):
 
         # ---- el aviso "¿Seguro?" con botón de mantener presionado ----
         self.hold_confirm = HoldConfirm(self)
+
+        # ---- 2.0: reacciones, "guardar en un disco", avisitos ----
+        self.reaction_bar = ReactionBar(self)
+        self.reaction_bar.picked.connect(lambda e: self.send_command("react", emoji=e))
+        self.album_picker = AlbumPicker(self)
+        self.album_picker.chosen.connect(self._save_to_album)
+        self.album_picker.new_album.connect(self._new_album_from_heart)
+        self.toast = Toast(self)
 
     # ================= pintado de capas =================
     def _paint_scrim(self, label: QLabel, top: bool):
@@ -1935,7 +2170,7 @@ class GlassScreen(QWidget):
 
     def _repaint_panels(self):
         for w in (self.playlist_sheet, self.search_view, self.settings_view, self.activity_view,
-                  self.status_panel, self.mini_player):
+                  self.status_panel, self.mini_player, self.lyrics_panel, self.albums_panel, self.wrapped_panel):
             w.update()
 
     # ================= switch de glass =================
@@ -1999,6 +2234,257 @@ class GlassScreen(QWidget):
         self._update_mode()
         self._on_activity(state.get("activity_last"))
         self._sync_mini()
+        self._apply_features()
+        self._on_reaction(state.get("reaction"))
+        rev = state.get("albums_rev")
+        if rev is not None and rev != self._albums_rev:
+            first = self._albums_rev is None
+            self._albums_rev = rev
+            if not first and (self._panel_mode == "albums" or self.album_picker.isVisible()):
+                self.albums_view.refresh()
+        if self._panel_mode == "lyrics":
+            self._lyrics_follow()
+
+    # ================= 2.0 =================
+    def _features(self):
+        return set(self.state.get("features") or []) if self.state.get("connected", True) else set()
+
+    def _apply_features(self):
+        f = self._features()
+        np = self.state.get("now_playing")
+        self.btn_shuffle.setVisible("shuffle" in f)
+        self.btn_repeat.setVisible("repeat" in f)
+        self.btn_react.setVisible("react" in f)
+        self.btn_heart.setVisible("albums" in f)
+        self.btn_lyrics.setVisible("lyrics" in f)
+        self._transport.setSpacing(20 if "shuffle" in f else 30)
+        self.progress.set_seekable("seek" in f and bool(np) and bool((np or {}).get("duration")))
+        if "prev" in f:
+            self.btn_prev.setEnabled(bool(np) or bool(self.state.get("can_prev")))
+            self.btn_prev.setToolTip("Atrás (si ya lleva un rato, vuelve al inicio)")
+        rep = self.state.get("repeat") or "off"
+        self.btn_repeat.set_icon("repeat_one" if rep == "one" else "repeat")
+        self.btn_repeat._icon_color = theme.GLASS_ACCENT if rep != "off" else "#FFFFFF"
+        self.btn_repeat.set_icon("repeat_one" if rep == "one" else "repeat")
+        self.btn_repeat.setToolTip({"off": "Repetir: apagado", "all": "Repitiendo toda la lista",
+                                    "one": "Repitiendo esta canción"}[rep] if rep in ("off", "all", "one") else "Repetir")
+        self._set_pills_visible(not self._empty_mode and not self._panel_mode)
+
+    def _on_repeat(self):
+        nxt = {"off": "all", "all": "one", "one": "off"}.get(self.state.get("repeat") or "off", "off")
+        self.state["repeat"] = nxt   # se ve al instante; el servidor confirma
+        self._apply_features()
+        self.send_command("set_repeat", mode=nxt)
+        self.toast.show_text({"off": "Sin repetir", "all": "Repetir toda la lista", "one": "Repetir esta canción"}[nxt],
+                             1400)
+
+    def _on_shuffle(self):
+        if len(self.state.get("queue") or []) < 2:
+            self.toast.show_text("Hacen falta al menos 2 canciones en la lista", 1800)
+            return
+        self.send_command("shuffle")
+        self.toast.show_text("Lista mezclada 🔀", 1500)
+
+    # ---- adelantar ----
+    def _on_scrub(self, f):
+        dur = (self.state.get("now_playing") or {}).get("duration") or 0
+        if dur:
+            self.time_elapsed.setText(fmt_time(f * dur))
+
+    def _on_seek_bar(self, f):
+        dur = (self.state.get("now_playing") or {}).get("duration") or 0
+        if dur:
+            self._seek_seconds(f * dur)
+
+    def _seek_seconds(self, sec):
+        np = self.state.get("now_playing")
+        if not np or "seek" not in self._features():
+            return
+        self._local_elapsed = float(sec)
+        np["elapsed"] = float(sec)
+        self._refresh_now()
+        if self._panel_mode == "lyrics":
+            self._lyrics_follow()
+        self.send_command("seek", pos=round(float(sec), 1))
+
+    # ---- reacciones ----
+    def _toggle_reactions(self):
+        g = self.btn_react.mapTo(self, self.btn_react.rect().center())
+        top = self.btn_react.mapTo(self, self.btn_react.rect().topLeft()).y()
+        self.reaction_bar.toggle_at(min(W - 40, g.x()), top - 6)
+
+    def _on_reaction(self, r):
+        if not isinstance(r, dict) or r.get("id") is None:
+            return
+        first = self._last_reaction is None
+        if r["id"] == self._last_reaction:
+            return
+        self._last_reaction = r["id"]
+        if first and time.time() - float(r.get("ts") or 0) > 8:
+            return   # una vieja que llegó al conectarse
+        if self._is_minimized() or not self.isVisible():
+            return
+        float_reaction(self, r.get("emoji") or "💜", r.get("who") or "")
+
+    # ---- paneles 2.0 ----
+    def _panels(self):
+        return {"search": self.search_view, "settings": self.settings_view, "activity": self.activity_view,
+                "status": self.status_panel, "lyrics": self.lyrics_panel, "albums": self.albums_panel,
+                "wrapped": self.wrapped_panel}
+
+    def _leave_panel(self):
+        """Antes de abrir un panel: esconde el que estaba (sin animación)."""
+        mode = self._panel_mode
+        if mode and mode in self._panels():
+            self._panels()[mode].hide()
+        if mode == "status":
+            self._status_timer.stop()
+        if mode == "search":
+            self.mini_player.hide()
+        self.reaction_bar.hide()
+        self._close_sheet()
+
+    def _open_panel(self, mode, widget):
+        self._leave_panel()
+        self._panel_mode = mode
+        self._searching = True
+        self._set_pills_visible(False)
+        self._panel_in(widget)
+        self.text_overlay.raise_()
+        self.toast.raise_()
+
+    def _close_panel(self, widget):
+        self._panel_out(widget)
+        self._after_panel_closed()
+
+    # karaoke
+    def open_lyrics(self):
+        np = self.state.get("now_playing")
+        if not np:
+            return
+        self._open_panel("lyrics", self.lyrics_panel)
+        self.lyrics_title.setText(np.get("title") or "Letra")
+        self.lyrics_sub.setText(np.get("uploader") or "")
+        key = np.get("webpage_url") or np.get("title")
+        if key != self._lyrics_for:
+            self._lyrics_for = key
+            self.lyrics_view.set_message("Buscando la letra…")
+            self._lyrics_retry = 0
+            self._request_lyrics()
+        self._lyrics_follow()
+
+    def _request_lyrics(self):
+        if self._panel_mode == "lyrics":
+            self.send_command("lyrics")
+
+    def set_lyrics(self, data):
+        np = self.state.get("now_playing") or {}
+        url = data.get("webpage_url")
+        if url and np.get("webpage_url") and url != np.get("webpage_url"):
+            return   # llegó tarde: es de la canción anterior
+        if data.get("pending") and self._lyrics_retry < 6:
+            self._lyrics_retry += 1
+            self.lyrics_view.set_message("Preparando la canción…")
+            self._lyrics_tick.start(2500)
+            return
+        self.lyrics_view.set_lyrics(data)
+        self.lyrics_credit.setVisible(bool(data.get("found")))
+        self.lyrics_credit.setText("Letras: LRCLIB · toca una línea para ir ahí" if self.lyrics_view.synced
+                                   else "Letras: LRCLIB · esta no trae tiempos")
+        self._lyrics_follow()
+
+    def _lyrics_follow(self):
+        np = self.state.get("now_playing")
+        if not np:
+            self.lyrics_view.set_message("Nada sonando")
+            return
+        key = np.get("webpage_url") or np.get("title")
+        if key != self._lyrics_for:   # cambió la canción con el karaoke abierto
+            self._lyrics_for = key
+            self.lyrics_title.setText(np.get("title") or "Letra")
+            self.lyrics_sub.setText(np.get("uploader") or "")
+            self.lyrics_view.set_message("Buscando la letra…")
+            self._lyrics_retry = 0
+            self._request_lyrics()
+        self.lyrics_view.set_position(self._local_elapsed, not np.get("paused"))
+
+    def _close_lyrics(self):
+        self._close_panel(self.lyrics_panel)
+
+    # Discos
+    def open_albums(self):
+        self._open_panel("albums", self.albums_panel)
+        if self.albums_view.stack.currentIndex() == 2:
+            self.albums_view.show_grid()
+        self.albums_view.set_albums(self._albums_cache)
+        self.send_command("album_list")
+
+    def _close_albums(self):
+        self._close_panel(self.albums_panel)
+
+    def set_albums(self, albums):
+        self._albums_cache = list(albums or [])
+        self.albums_view.set_albums(self._albums_cache)
+        if self.album_picker.isVisible():
+            self._open_picker(refresh=False)
+
+    def set_album(self, album):
+        self.albums_view.editor_done()
+        self.albums_view.set_album(album)
+
+    def set_album_cover(self, h, img):
+        if h and img is not None and not img.isNull():
+            self.art_cache.put(cover_key(h), img)
+
+    def on_album_added(self, data):
+        n = data.get("added") or 0
+        alb = next((a for a in self._albums_cache if a.get("id") == data.get("id")), None)
+        name = (alb or {}).get("name") or "el disco"
+        if n:
+            self.toast.show_text(f"Guardada en «{name}» 💜")
+            self.btn_heart._icon_color = "#FF6B9A"
+            self.btn_heart.set_icon("heart_fill")
+            QTimer.singleShot(1800, self._heart_back)
+        else:
+            self.toast.show_text(f"Ya estaba en «{name}»")
+
+    def _heart_back(self):
+        self.btn_heart._icon_color = "#FFFFFF"
+        self.btn_heart.set_icon("heart")
+
+    def show_server_error(self, message):
+        self.albums_view.editor_done()
+        self.toast.show_text(message or "Algo salió mal", 3200)
+
+    def _album_sleeve_small(self, a, size):
+        return self.albums_view._sleeve(a, size)
+
+    def _open_picker(self, refresh=True):
+        np = self.state.get("now_playing")
+        if not np:
+            return
+        if refresh:
+            self.send_command("album_list")
+        self.reaction_bar.hide()
+        self.album_picker.open(self._albums_cache, np.get("title"), self.art_cache, self._album_sleeve_small)
+
+    def _save_to_album(self, album_id):
+        self.send_command("album_add", id=album_id, current=True)
+
+    def _new_album_from_heart(self):
+        self.open_albums()
+        self.albums_view.open_editor(None, add_current=True)
+
+    # Wrapped
+    def open_wrapped(self):
+        self._open_panel("wrapped", self.wrapped_panel)
+        self.wrapped_view.load()
+
+    def _close_wrapped(self):
+        self._close_panel(self.wrapped_panel)
+
+    def set_stats(self, data):
+        self.wrapped_view.set_stats(data)
 
     # ---- actividad ----
     def _on_activity(self, a):
@@ -2040,6 +2526,8 @@ class GlassScreen(QWidget):
         )
 
     def open_status(self):
+        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+            self._leave_panel()
         for mode, w in (("search", self.search_view), ("settings", self.settings_view),
                         ("activity", self.activity_view)):
             if self._panel_mode == mode:
@@ -2082,6 +2570,8 @@ class GlassScreen(QWidget):
         self._after_panel_closed()
 
     def open_activity(self):
+        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+            self._leave_panel()
         if self._panel_mode == "status":
             self._status_timer.stop()
             self.status_panel.hide()
@@ -2218,7 +2708,11 @@ class GlassScreen(QWidget):
         self.idle_title.setText(np["title"])
         self.idle_artist.setText(np.get("uploader") or "")
         self.mp_title.setText(np["title"])
-        self.now_artist.setText(np.get("uploader") or "")
+        who = "la radio" if np.get("radio") else np.get("who")
+        artist = np.get("uploader") or ""
+        if who and who != self.my_name():
+            artist = f"{artist} · puso {who}" if artist else f"puso {who}"
+        self.now_artist.setText(artist)
         self.mp_artist.setText(np.get("uploader") or "")
 
         art_url = np.get("art_url")
@@ -2408,6 +2902,8 @@ class GlassScreen(QWidget):
 
     # ---- buscador ----
     def _open_search(self):
+        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+            self._leave_panel()
         if self._panel_mode == "status":
             self._status_timer.stop()
             self.status_panel.hide()
@@ -2725,11 +3221,15 @@ class GlassScreen(QWidget):
 
     # ---- ajustes (pantalla propia) ----
     # ---------- la rueda de Opciones y sus secciones ----------
-    MENU_TITLES = {"main": "Opciones", "apariencia": "Apariencia", "size": "Tamaño",
+    MENU_TITLES = {"musica": "Música", "sleep": "Temporizador", "conexiones": "Teclado y Discord",
+                   "main": "Opciones", "apariencia": "Apariencia", "size": "Tamaño",
                    "streamer": "Modo streamer", "shape": "Forma del mini", "chroma": "Fondo para OBS",
                    "dim": "Oscuridad"}
     MENU_PARENT = {"apariencia": "main", "streamer": "main", "size": "apariencia",
-                   "shape": "streamer", "chroma": "streamer", "dim": "apariencia"}
+                   "shape": "streamer", "chroma": "streamer", "dim": "apariencia",
+                   "musica": "main", "sleep": "musica", "conexiones": "main"}
+    SLEEPS = [(15, "En 15 minutos"), (30, "En 30 minutos"), (45, "En 45 minutos"), (60, "En 1 hora"),
+              (90, "En 1 hora y media")]
     SCALES = [(1.0, "100%"), (0.9, "90%"), (0.8, "80%"), (0.7, "70%")]
     DIMS = [(0.0, "Sin oscurecer"), (0.15, "15%"), (0.3, "30%"), (0.5, "50%"), (0.75, "75%"),
             (1.0, "100%")]
@@ -2776,17 +3276,63 @@ class GlassScreen(QWidget):
             return [back] + [{"key": f"dim:{val}", "label": name, "icon": "dim",
                               "hint": "Elegida" if abs(val - v["mini_dim"]) < 0.01 else None}
                              for val, name in self.DIMS]
+        f = self._features()
+        onoff = lambda b: "Encendido" if b else "Apagado"
+        if menu == "musica":
+            items = [back]
+            if "sleep" in f:
+                items.append({"key": "menu:sleep", "label": "Temporizador", "icon": "timer",
+                              "hint": self._sleep_hint()})
+            if "radio" in f:
+                items.append({"key": "radio", "label": "Radio al acabarse la lista", "icon": "radio",
+                              "hint": onoff(self.state.get("radio"))})
+            if "normalize" in f:
+                items.append({"key": "normalize", "label": "Volumen parejo", "icon": "wave",
+                              "hint": onoff(self.state.get("normalize"))})
+            if "shuffle" in f:
+                items.append({"key": "shuffle", "label": "Mezclar la lista", "icon": "shuffle"})
+            return items
+        if menu == "sleep":
+            sl = self.state.get("sleep") or {}
+            return [back] + [{"key": f"sleep:{m}", "label": name, "icon": "timer"} for m, name in self.SLEEPS] + [
+                {"key": "sleep:eot", "label": "Al terminar esta canción", "icon": "timer",
+                 "hint": "Puesto" if sl.get("eot") else None},
+                {"key": "sleep:0", "label": "Quitar temporizador", "icon": "remove",
+                 "hint": None if (sl.get("at") or sl.get("eot")) else "No hay"}]
+        if menu == "conexiones":
+            return [back,
+                    {"key": "media_keys", "label": "Teclas multimedia", "icon": "keyboard",
+                     "hint": onoff(v.get("media_keys", True))},
+                    {"key": "presence", "label": "Mostrar en Discord", "icon": "discord",
+                     "hint": onoff(v.get("presence", True))}]
         # menú principal
-        items = [{"key": "activity", "label": "Actividad", "icon": "chat"},
+        items = []
+        if "albums" in f:
+            items.append({"key": "albums", "label": "Discos", "icon": "disc"})
+        if "stats" in f:
+            items.append({"key": "wrapped", "label": "Tu Wrapped", "icon": "chart"})
+        if f & {"sleep", "radio", "normalize", "shuffle"}:
+            items.append({"key": "menu:musica", "label": "Música", "icon": "wave", "hint": self._sleep_hint(short=True)})
+        items += [{"key": "activity", "label": "Actividad", "icon": "chat"},
                  {"key": "status", "label": "Estado del servidor", "icon": "pulse"},
                  {"key": "menu:apariencia", "label": "Apariencia", "icon": "sparkle"},
                  {"key": "menu:streamer", "label": "Modo streamer", "icon": "streamer",
-                  "hint": "Encendido" if v["streamer"] else "Apagado"}]
+                  "hint": "Encendido" if v["streamer"] else "Apagado"},
+                 {"key": "menu:conexiones", "label": "Teclado y Discord", "icon": "keyboard"}]
         for row in self.settings_rows():
             label, icon = (row, "settings") if isinstance(row, str) else row
             items.append({"key": "row:" + label, "label": label, "icon": icon})
         items.append({"key": "power", "label": "Apagar Cumito", "icon": "power", "danger": True})
         return items
+
+    def _sleep_hint(self, short=False):
+        sl = self.state.get("sleep") or {}
+        if sl.get("eot"):
+            return "Al terminar" if short else "Al terminar esta canción"
+        if sl.get("at"):
+            left = max(0, int((float(sl["at"]) - time.time()) / 60) + 1)
+            return f"Se apaga en {left} min"
+        return None if short else "Apagado"
 
     def _show_dim_editor(self):
         self._menu = "dim"
@@ -2835,6 +3381,8 @@ class GlassScreen(QWidget):
             self.mini.set_dim(self.visual["mini_dim"])
 
     def _open_settings(self):
+        if self._panel_mode in ("lyrics", "albums", "wrapped"):
+            self._leave_panel()
         if self._panel_mode == "status":
             self._status_timer.stop()
             self.status_panel.hide()
@@ -2862,6 +3410,8 @@ class GlassScreen(QWidget):
             sub = key[5:]
             if menu == "main":
                 self._last_option = key
+            if sub == "sleep":
+                cur = None
             cur = {"size": f"scale:{self.ui_scale}", "shape": "shape:" + self.visual["mini_shape"],
                    "chroma": "chroma:" + self.visual["chroma"]}.get(sub)
             if sub == "dim":
@@ -2888,6 +3438,42 @@ class GlassScreen(QWidget):
                 return
             # el tamaño se aplica al abrir: Cumito se reinicia solo
             self.on_scale_changed(val)
+            return
+        if key.startswith("sleep:"):
+            val = key[6:]
+            if val == "eot":
+                self.send_command("sleep", end_of_track=True)
+                self.toast.show_text("Cumito se apaga al terminar esta canción 🌙")
+            elif val == "0":
+                self.send_command("sleep", minutes=0)
+                self.toast.show_text("Temporizador quitado")
+            else:
+                self.send_command("sleep", minutes=int(val))
+                self.toast.show_text(f"Cumito se apaga en {val} minutos 🌙")
+            self._close_settings()
+            return
+        if key in ("radio", "normalize"):
+            now = not bool(self.state.get(key))
+            self.state[key] = now
+            self.send_command("set_radio" if key == "radio" else "set_normalize", on=now)
+            self._show_menu(menu, keep_key=key)
+            return
+        if key == "shuffle":
+            self._close_settings()
+            self._on_shuffle()
+            return
+        if key in ("media_keys", "presence"):
+            self.visual[key] = not self.visual.get(key, True)
+            self._visual_changed()
+            self._show_menu(menu, keep_key=key)
+            return
+        if key == "albums":
+            self._last_option = key
+            self.open_albums()
+            return
+        if key == "wrapped":
+            self._last_option = key
+            self.open_wrapped()
             return
         if key == "streamer":
             self.visual["streamer"] = not self.visual["streamer"]
@@ -2932,6 +3518,20 @@ class GlassScreen(QWidget):
                 return
             if self._panel_mode == "status":
                 self._close_status()
+                return
+            if self._panel_mode == "lyrics":
+                self._close_lyrics()
+                return
+            if self._panel_mode == "wrapped":
+                self._close_wrapped()
+                return
+            if self._panel_mode == "albums":
+                if self.albums_view.stack.currentIndex() == 0:
+                    self._close_albums()
+                elif self.albums_view.stack.currentIndex() == 2:
+                    self.albums_view._cancel_editor()
+                else:
+                    self.albums_view.show_grid()
                 return
         super().keyPressEvent(ev)
 
@@ -2989,6 +3589,7 @@ class GlassScreen(QWidget):
             self._panel_mode or self._sheet_open or self._empty_mode
             or not self.state.get("now_playing")
             or self.hold_confirm.isVisible() or self.text_overlay.isVisible()
+            or self.album_picker.isVisible() or self.reaction_bar.isVisible()
             or (self.update_banner.isVisible() and self.update_banner.y() > 0)
         )
 
@@ -3030,6 +3631,7 @@ class GlassScreen(QWidget):
     # ================= modo mini (streamer) =================
     def _set_pills_visible(self, visible):
         self.search_pill.setVisible(bool(visible))
+        self.discos_pill.setVisible(bool(visible) and "albums" in self._features())
         self.mini_pill.setVisible(bool(visible) and self.visual.get("streamer", False))
 
     def _sync_mini(self):
@@ -3161,7 +3763,8 @@ class GlassScreen(QWidget):
             self._local_elapsed += TICK_MS / 1000
             dur = np.get("duration") or 0
             elapsed = min(self._local_elapsed, dur) if dur else self._local_elapsed
-            self.time_elapsed.setText(fmt_time(elapsed))
+            if self.progress._drag is None:
+                self.time_elapsed.setText(fmt_time(elapsed))
             self.progress.setFraction(elapsed / dur if dur else 0)
         if self._sheet_open:
             # el ecualizador solo se anima mientras la bandeja está visible

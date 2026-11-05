@@ -457,7 +457,15 @@ class BotCore:
             "can_prev": bool(self.played) or (bool(cur) and self._elapsed() > 5),
             "reaction": self.reaction,
             "albums_rev": self.db.albums_rev,
+            "app_id": self._app_id(),   # para que las apps muestren "Escuchando en Cumito" en Discord
         }
+
+    def _app_id(self):
+        try:
+            v = self.client.application_id
+            return str(v) if isinstance(v, int) else None
+        except Exception:
+            return None
 
     async def _guild(self):
         await self.ready.wait()

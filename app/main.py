@@ -18,6 +18,8 @@ from PySide6.QtWidgets import QApplication
 from cumito import config
 from cumito.connect_screen import ConnectScreen
 from cumito.glass_screen import GlassScreen
+from cumito.mediakeys import MediaKeys
+from cumito.presence import DiscordPresence
 from cumito.runtime import CumitoRuntime
 from cumito.splash import Splash, fade_in_window
 from cumito.updater import Updater, run_installer_and_quit
@@ -34,6 +36,37 @@ class CumitoWindow(GlassScreen):
         self.set_visual(self.cfg.get("visual") or {})
         self.text_overlay.submitted.connect(self._on_text_submitted)
         self.btn_close.clicked.connect(QApplication.instance().quit)
+        # 2.0: "Escuchando en Cumito" en Discord y teclas multimedia
+        self.presence = DiscordPresence()
+        self.media_keys = MediaKeys(QApplication.instance(), self, self._on_media_key)
+        QTimer.singleShot(0, self._apply_integrations)
+
+    def my_name(self):
+        return self.cfg.get("display_name") or None
+
+    def _apply_integrations(self):
+        v = self.visual
+        try:
+            if v.get("media_keys", True):
+                self.media_keys.start()
+            else:
+                self.media_keys.stop()
+        except Exception:
+            pass
+        self.presence.set_enabled(v.get("presence", True))
+        self._update_presence()
+
+    def _update_presence(self):
+        np = self.state.get("now_playing") if self.state.get("connected", True) else None
+        self.presence.set_track(np, self._local_elapsed)
+
+    def _on_media_key(self, name):
+        if name == "play_pause":
+            self._on_play_pause()
+        elif name == "next":
+            self.send_command("skip")
+        elif name == "prev" and "prev" in self._features():
+            self.send_command("prev")
 
     # ---------- ajustes ----------
     def settings_rows(self):
@@ -71,6 +104,7 @@ class CumitoWindow(GlassScreen):
     def on_visual_changed(self, visual):
         self.cfg["visual"] = visual
         config.save(self.cfg)
+        self._apply_integrations()
 
     # ---------- búsqueda ----------
     def on_recent_searches_changed(self, searches):
@@ -110,11 +144,15 @@ class CumitoWindow(GlassScreen):
             kind, payload = self.runtime.events.get()
             if kind == "state":
                 self.set_state({**payload, "connected": True})
+                if payload.get("app_id"):
+                    self.presence.set_client_id(payload.get("app_id"))
+                self._update_presence()
             elif kind == "connected":
                 if not payload:
                     # sin servidor no hay nada sonando que mostrar; al
                     # reconectar, el servidor manda el estado real solo.
                     self.set_state({"connected": False, "now_playing": None, "queue": []})
+                    self._update_presence()
             elif kind == "search_results":
                 self.set_search_results(payload.get("query"), payload.get("results") or [],
                                         offset=int(payload.get("offset") or 0), kind=payload.get("kind"))
@@ -124,6 +162,23 @@ class CumitoWindow(GlassScreen):
                 self.set_activity_list(payload.get("entries") or [])
             elif kind == "status":
                 self.set_server_status(payload)
+            # 2.0
+            elif kind == "lyrics":
+                self.set_lyrics(payload)
+            elif kind == "stats":
+                self.set_stats(payload)
+            elif kind == "albums":
+                self.set_albums(payload.get("albums") or [])
+            elif kind == "album":
+                self.set_album(payload.get("album"))
+            elif kind == "album_cover":
+                if payload.get("data"):
+                    from cumito.albums import b64_to_image
+                    self.set_album_cover(payload.get("cover"), b64_to_image(payload["data"]))
+            elif kind == "album_added":
+                self.on_album_added(payload)
+            elif kind == "error":
+                self.show_server_error(payload.get("message"))
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb):
@@ -285,6 +340,14 @@ def main():
         splash.finished.connect(after_splash)
         splash.finished.connect(win._update_ctl.updater.check)
         splash.start()
+
+    def _bye():
+        try:
+            win.presence.stop()
+            win.media_keys.stop()
+        except Exception:
+            pass
+    app.aboutToQuit.connect(_bye)
 
     try:
         sys.exit(app.exec())
