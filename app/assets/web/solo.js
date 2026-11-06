@@ -71,6 +71,7 @@
 
   /* ---------- reproducir ---------- */
   function start(t, at, keepFollow) {
+    endedUid = null;
     if (O.cur && O.cur !== t) { O.played.push(O.cur); if (O.played.length > 60) O.played.shift(); }
     O.cur = t; O.want = true; O.ended = false; O.startAt = at || 0;
     if (!keepFollow) O.follow = null;
@@ -92,7 +93,9 @@
     t.asking = pre ? 'pre' : 'now';
     rs('solo_get', { url: t.webpage_url, title: t.title !== 'Cargando…' ? t.title : null, pre: !!pre });
   }
-  function prefetch() { const n = O.q[0]; if (n && !n.src) fetchTrack(n, true); }
+  // deja listas las 2 que siguen (si la siguiente no está bajada cuando se acaba
+  // la actual, con la pantalla apagada el celular puede no recibir la respuesta)
+  function prefetch() { O.q.slice(0, 2).forEach((n) => { if (n && !n.src) fetchTrack(n, true); }); }
   function next(manual) {
     if (manual) O.follow = null;
     if (O.repeat === 'all' && O.cur) O.q.push(mk(O.cur, { radio: O.cur.radio }));
@@ -451,16 +454,47 @@
     S.elapsed = audio.currentTime; S.elapsedAt = performance.now();
     if (!O.want) { O.want = true; refresh(); report(false); } else media();
   });
+  // ¿se quedó parado en el final? (algunos celulares no avisan 'ended' porque el
+  // archivo dice durar un poquito más de lo que dura de verdad)
+  const atEnd = () => { const d = audio.duration || (O.cur && O.cur.duration) || 0; return d > 0 && audio.currentTime >= d - 1.2; };
   audio.addEventListener('pause', () => {
     // pausó el sistema (llamada, audífonos desconectados...): que la app lo muestre
     if (isSilent() || !O.on || audio.ended || !O.want || !O.cur || !O.cur.src) return;
-    setTimeout(() => { if (audio.paused && O.want && !audio.ended && audio.readyState >= 2) { O.want = false; refresh(); report(false); } }, 400);
+    setTimeout(() => {
+      if (!audio.paused || !O.want || audio.ended || audio.readyState < 2) return;
+      if (atEnd()) return finished();
+      O.want = false; refresh(); report(false);
+    }, 400);
   });
-  audio.addEventListener('ended', () => {
-    if (isSilent() || !O.on) return;
-    if (O.follow) { O.want = false; refresh(); return; }   // espera a que la otra persona cambie
-    if (O.repeat === 'one') { audio.currentTime = 0; audio.play().catch(() => {}); report(true); return; }
+  let endedUid = null;
+  function finished() {
+    if (!O.cur || endedUid === O.cur.uid) return;   // una sola vez por canción
+    endedUid = O.cur.uid;
+    if (O.follow) {
+      // espera a que la otra persona pase a la siguiente; si en unos segundos no
+      // llega nada (se le apagó el celular), sigue con tu lista
+      O.want = false; refresh();
+      const c = O.cur, who = O.follow;
+      setTimeout(() => {
+        if (O.follow === who && O.cur === c) {
+          O.follow = null;
+          toast('Se cortó la sala de ' + (who === '@discord' ? 'Discord' : who) + ': sigo con tu lista');
+          next(false);
+        }
+      }, 7000);
+      return;
+    }
+    if (O.repeat === 'one') { endedUid = null; audio.currentTime = 0; audio.play().catch(() => {}); report(true); return; }
     next(false);
+  }
+  audio.addEventListener('ended', () => { if (!isSilent() && O.on) finished(); });
+  // por si el celular no avisó: cada 2 s revisa si la canción ya terminó
+  setInterval(() => {
+    if (!O.on || !O.cur || !O.want || isSilent() || !O.cur.src) return;
+    if (audio.ended || (audio.paused && audio.readyState >= 2 && atEnd())) finished();
+  }, 2000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && O.on && O.cur && O.want && (audio.ended || atEnd())) finished();
   });
   audio.addEventListener('error', () => {
     if (isSilent() || !O.on || !O.cur) return;
