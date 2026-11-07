@@ -844,7 +844,8 @@
     h += '<div class="sec"><button class="opt" type="button" data-a="entry"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Cambiar de modo</b><small>' + (S.mode === 'solo' ? 'Pasar a LAPAJA (Discord)' : 'Pasar al modo solo') + '</small></span>' + I.chev.replace('<svg', '<svg width="16" height="16" style="color:var(--mut)"') + '</button>' +
       '<button class="opt" type="button" data-a="rename"><span class="oi">' + I.pen + '</span><span style="flex:1"><b>Cambiar mi nombre</b><small>Así te ven los demás</small></span></button>' +
       '<label class="opt"><span class="oi">' + I.phones + '</span><span style="flex:1"><b>Recordar cómo entro</b><small>Abrir directo en el último modo</small></span><input type="checkbox" data-a="remember"' + (LS.get('m3.remember', true) ? ' checked' : '') + ' style="width:20px;height:20px;accent-color:#8E6CF2"></label>' +
-      '<button class="opt" type="button" data-a="status"><span class="oi">' + I.cpu + '</span><span style="flex:1"><b>Estado del servidor</b><small>' + esc(S.status ? 'Versión ' + ((S.status.versions || {}).server || '?') : 'Cómo va la VM') + '</small></span>' + I.chev.replace('<svg', '<svg width="16" height="16" style="color:var(--mut)"') + '</button></div>';
+      (SCR.gap ? '<label class="opt"><span class="oi">' + I.phones + '</span><span style="flex:1"><b>Pegar al borde de abajo</b><small>Si en tu iPhone queda un espacio negro abajo</small></span><input type="checkbox" data-a="gapfix"' + (LS.get('gapfix', false) ? ' checked' : '') + '></label>' : '') +
+            '<button class="opt" type="button" data-a="status"><span class="oi">' + I.cpu + '</span><span style="flex:1"><b>Estado del servidor</b><small>' + esc(S.status ? 'Versión ' + ((S.status.versions || {}).server || '?') : 'Cómo va la VM') + '</small></span>' + I.chev.replace('<svg', '<svg width="16" height="16" style="color:var(--mut)"') + '</button></div>';
     h += '<div class="sec"><div class="sec-h"><h2 class="h2">Tu Wrapped</h2></div><div class="seg">' + [['week', 'Semana'], ['month', 'Mes'], ['year', 'Año'], ['all', 'Siempre']].map((p) => '<button type="button" class="' + (S.statsPeriod === p[0] ? 'on' : '') + '" data-a="speriod" data-p="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>' +
       '<div class="seg" style="margin-top:8px"><button type="button" class="' + (!S.statsMine ? 'on' : '') + '" data-a="smine" data-m="0">Todo el grupo</button><button type="button" class="' + (S.statsMine ? 'on' : '') + '" data-a="smine" data-m="1">Solo yo</button></div>';
     if (!st) h += '<div style="height:12px"></div>' + skelRows(3);
@@ -1490,7 +1491,7 @@
   document.addEventListener('click', (e) => {
     const t = e.target.closest('[data-a]');
     if (!t || t.disabled) return;
-    if (t.matches('input[type=checkbox]')) { if (t.dataset.a === 'remember') LS.set('m3.remember', t.checked); return; }
+    if (t.matches('input[type=checkbox]')) { if (t.dataset.a === 'remember') LS.set('m3.remember', t.checked); if (t.dataset.a === 'gapfix') { LS.set('gapfix', t.checked); measure(); } return; }
     const f = A[t.dataset.a];
     if (f) { e.preventDefault(); f(t, e); }
   });

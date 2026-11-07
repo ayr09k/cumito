@@ -392,17 +392,24 @@ a.opt.quiet{opacity:.7}
 .opt input[type=checkbox]:checked{background:var(--vio)}
 .opt input[type=checkbox]:checked:after{transform:translateX(19px)}
 
-/* ---- 3.0.2: barra de abajo pegada al borde, como las apps del iPhone ---- */
-.tabs{height:calc(58px + var(--sb));padding-bottom:var(--sb);background:rgba(10,9,17,.84);-webkit-backdrop-filter:blur(24px) saturate(150%);backdrop-filter:blur(24px) saturate(150%);border-top:1px solid rgba(255,255,255,.07)}
-.tabs:before{content:"";position:absolute;left:0;right:0;bottom:100%;height:34px;background:linear-gradient(180deg,rgba(8,7,14,0),rgba(8,7,14,.7));pointer-events:none}
-.tab{justify-content:flex-start;padding-top:9px;gap:3px}
-.mini{bottom:calc(66px + var(--sb))}
-.toast{bottom:calc(146px + var(--sb))}
-.screen{padding-bottom:calc(150px + var(--sb))}
-/* iOS 26: si la app queda más bajita que la pantalla, se estira hasta el borde */
-.gapfix .tabs{bottom:calc(-1 * var(--gap));height:calc(58px + max(var(--sb),18px));padding-bottom:max(var(--sb),18px)}
-.gapfix .mini{bottom:calc(66px + max(var(--sb),18px) - var(--gap))}
-.gapfix .screen,.gapfix .player,.gapfix .sheet,.gapfix .lyr,.gapfix .entry,.gapfix #bg{bottom:calc(-1 * var(--gap))}
+/* ---- 3.0.4: menú y mini reproductor flotando, como Apple Music ---- */
+:root{--tb:max(calc(var(--sb) - 20px),10px)}
+.gapfix{--tb:calc(10px - var(--gap))}
+body:after{content:"";position:fixed;left:0;right:0;bottom:0;z-index:4;height:calc(var(--tb) + 170px);background:linear-gradient(180deg,rgba(8,7,14,0),rgba(8,7,14,.55) 45%,rgba(8,7,14,.85));pointer-events:none}
+.gapfix body:after{bottom:calc(-1 * var(--gap))}
+.tabs{left:14px;right:14px;bottom:var(--tb);height:62px;padding:0 5px;align-items:center;border-radius:31px;background:rgba(30,26,46,.58);-webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);border:1px solid rgba(255,255,255,.13);box-shadow:0 18px 40px -14px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.07)}
+.tab{height:52px;justify-content:center;gap:2px;border-radius:26px;font-size:10px;transition:color .25s,background .3s}
+.tab svg{width:22px;height:22px}
+.tab.on{background:rgba(255,255,255,.12)}
+.tab.on svg{transform:none}
+.mini{left:14px;right:14px;bottom:calc(var(--tb) + 70px);height:58px;border-radius:29px;padding:0 8px 0 7px;background:rgba(30,26,46,.58);-webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);border:1px solid rgba(255,255,255,.13);box-shadow:0 18px 40px -14px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.07)}
+.mini .mc{width:44px;height:44px;border-radius:22px}
+.mini .mb{left:30px;right:30px;bottom:3px}
+.toast{bottom:calc(var(--tb) + 142px)}
+.screen{padding-bottom:calc(var(--tb) + 150px)}
+.player{padding-bottom:calc(var(--tb) + 4px)}
+.gapfix .player{bottom:calc(-1 * var(--gap));padding-bottom:14px}
+.gapfix .screen,.gapfix .sheet,.gapfix .lyr,.gapfix .entry,.gapfix #bg{bottom:calc(-1 * var(--gap))}
 .diag{margin:10px 18px 0;font-size:10.5px;font-weight:600;color:var(--mut2);text-align:center}
 .row .rc.wide{width:84px;height:47px;border-radius:10px}
 .row.vid .rt{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.25}
