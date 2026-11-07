@@ -106,7 +106,7 @@
     tab: 'home', stack: [], homeFilter: 'all',
     search: { q: '', kind: 'all', res: null, loading: false, key: '' },
     feed: { data: LS.get('m3.feed', null), at: 0, key: '', loading: false },
-    albums: [], covers: {}, asked: {}, discPage: null,
+    albums: LS.get('m3.albums', []), covers: LS.get('m3.covers', {}), asked: {}, discPage: null,
     lyr: { key: null, lines: null, plain: null, found: false, loading: false },
     stats: null, statsPeriod: 'month', statsMine: false, status: null,
     playerOpen: false, sheet: null, recent: LS.get('recent', []),
@@ -130,12 +130,15 @@
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }
   function cmd(action, kw) {
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify(Object.assign({ type: 'command', action: action }, kw || {})));
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify(Object.assign({ type: 'command', action: action }, kw || {})));
+    return true;
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !ws && S.me) { wsWait = 1000; connect(); } });
   function feat(f) { return (S.g.features || []).includes(f); }
 
   function onConnected() {
+    S.asked = {};
     cmd('album_list');
     cmd('fav_list');
     if (E.on && E.cur) { E.report(false); E.sendPlan(); }
@@ -160,7 +163,7 @@
     yt_album(d) { const p = top(); if (p && p.type === 'list' && p.kind === 'album' && p.id === d.id) { Object.assign(p, { title: d.title, sub: [d.artist, d.year].filter(Boolean).join(' · '), art: d.art_url, tracks: d.tracks || [], loading: false }); renderScreen(); } },
     yt_playlist(d) { const p = top(); if (p && p.type === 'list' && p.kind === 'playlist' && p.url === d.url) { p.tracks = d.tracks || []; if (d.name) p.title = d.name; p.art = p.art || (p.tracks[0] && p.tracks[0].art_url); p.loading = false; renderScreen(); } },
     home_feed(d) { S.feed.data = d; S.feed.at = Date.now(); S.feed.loading = false; LS.set('m3.feed', d); renderScreen(); },
-    albums(d) { S.albums = d.albums || []; renderScreen(); if (S.sheet === 'picker') openPicker(S.pickMeta, true); },
+    albums(d) { S.albums = d.albums || []; LS.set('m3.albums', S.albums.slice(0, 60)); renderScreen(); if (S.sheet === 'picker') openPicker(S.pickMeta, true); },
     album(d) {
       const a = d.album;
       if (!a) return;
@@ -168,7 +171,19 @@
       const p = top();
       if (p && p.type === 'list' && p.kind === 'disc' && p.id === a.id) { Object.assign(p, { title: a.name, sub: 'Disco de ' + (a.owner || '') + ' · ' + (a.count || 0) + ' canciones', tracks: a.tracks || [], disc: a, loading: false }); renderScreen(); }
     },
-    album_cover(d) { if (d.cover && d.data) { S.covers[d.cover] = 'data:image/jpeg;base64,' + d.data; renderScreen(); } },
+    album_cover(d) {
+      if (!d.cover || !d.data) return;
+      S.covers[d.cover] = 'data:image/jpeg;base64,' + d.data;
+      try {
+        const keep = LS.get('m3.covers', {});
+        keep[d.cover] = S.covers[d.cover];
+        const ks = Object.keys(keep);
+        while (ks.length > 24) delete keep[ks.shift()];
+        LS.set('m3.covers', keep);
+      } catch (e) {}
+      renderScreen();
+      if (S.sheet === 'picker') openPicker(S.pickMeta, true);
+    },
     album_added(d) { if (d && (d.added || d.ok !== false)) toast(d.message || 'Guardada en el disco'); },
     lyrics(d) { onLyrics(d); },
     stats(d) { S.stats = d; renderScreen(); },
@@ -849,7 +864,15 @@
   function updSearch() { const b = $('sres'); if (b && S.tab === 'search' && !S.stack.length) b.innerHTML = searchBody(); else renderScreen(); }
 
   function discArt(a) { return a.cover ? (S.covers[a.cover] || (askCover(a.cover), null)) : ((a.arts || [])[0] || null); }
-  function askCover(h) { if (h && !S.asked[h]) { S.asked[h] = 1; cmd('album_cover', { cover: h }); } }
+  function askCover(h) {
+    if (!h || S.covers[h]) return;
+    const t = S.asked[h];
+    if (t && Date.now() - t < 12000) return;
+    if (cmd('album_cover', { cover: h })) {
+      S.asked[h] = Date.now();
+      setTimeout(() => { if (!S.covers[h]) renderScreen(); }, 12500);   // no llegó: se vuelve a pedir
+    }
+  }
   function discStyle(a) {
     if (a.cover) { const c = S.covers[a.cover]; askCover(a.cover); if (c) return bgi(c); }
     const arts = a.arts || [];
@@ -911,7 +934,7 @@
   function scList(p) {
     const tracks = p.tracks || [];
     rowsCtx(tracks);
-    const art = p.art || (tracks[0] && tracks[0].art_url);
+    const art = (p.kind === 'disc' && p.disc && discArt(p.disc)) || p.art || (tracks[0] && tracks[0].art_url);
     const total = tracks.reduce((s, t) => s + (t.duration || 0), 0);
     let h = '<div class="pg"><div class="phero" style="height:calc(300px + var(--st))"><span class="pbg blur" style="' + bgi(art) + '"></span><span class="pcv" style="' + (p.kind === 'disc' && p.disc ? discStyle(p.disc) : bgi(art)) + '"></span></div>' +
       '<div class="ptx low" style="text-align:center"><div class="pk">' + esc(p.k || (p.kind === 'album' ? 'ÁLBUM' : p.kind === 'playlist' ? 'PLAYLIST' : p.kind === 'artistSongs' ? 'TODAS LAS CANCIONES' : 'LISTA')) + '</div>' +
