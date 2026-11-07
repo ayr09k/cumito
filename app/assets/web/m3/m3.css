@@ -353,3 +353,41 @@ img{-webkit-user-drag:none;user-select:none}
 
 .hero .hk,.hero .ht,.hero .hs2{display:block}
 .pacts{position:relative;z-index:1}
+
+/* ---- 3.0.1: la portada como fondo de pantalla en el reproductor ---- */
+.player{display:block}
+.player>.pl-wall{position:absolute;left:0;right:0;top:0;height:72%;z-index:0;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 58%,transparent);mask-image:linear-gradient(180deg,#000 58%,transparent)}
+.pl-wall .wimg{position:absolute;top:0;bottom:0;left:-80px;width:calc(100% + 80px);background:#221E33 center/cover no-repeat;opacity:0;transition:opacity 1s,filter .7s;animation:pan 30s ease-in-out infinite alternate}
+.pl-wall .wimg.on{opacity:1}
+@keyframes pan{0%{transform:translateX(0)}100%{transform:translateX(80px)}}
+.player.is-paused .wimg{animation-play-state:paused;filter:brightness(.72) saturate(.85)}
+.player:before{background:linear-gradient(180deg,rgba(8,7,14,.5) 0,rgba(8,7,14,0) 17%,rgba(8,7,14,0) 38%,rgba(8,7,14,.5) 58%,rgba(8,7,14,.9) 78%,rgba(8,7,14,.96))}
+.pl-body{position:relative;z-index:2;height:100%;display:flex;flex-direction:column}
+.pl-space{flex:1;min-height:20px}
+.pl-roomrow{padding:0 26px 10px}
+.pl-roomrow .pl-room{position:static;display:inline-flex}
+.pl-info{margin-top:0}
+.pl-info .t{text-shadow:0 2px 18px rgba(0,0,0,.45)}
+.seek{margin-top:16px}
+/* controles: 20% más chicos a la vista (el área para tocar sigue igual) */
+.player .ctrls{margin-top:6px;padding:0 26px}
+.player .cb svg{width:22px;height:22px}
+.player .cb.sm svg{width:18px;height:18px}
+.player .cb.play{width:76px;height:76px;padding:6px;background:var(--txt);background-clip:content-box;box-shadow:none;filter:drop-shadow(0 12px 22px rgba(0,0,0,.45))}
+.player .cb.play svg{width:24px;height:24px}
+/* letra y lista: más bajitas */
+.player .pl-low{margin-top:14px}
+.player .lycard{height:62px;padding:9px 15px;border-radius:18px}
+.player .lycard .l1{font-size:15.5px;margin-top:4px}
+.player .qbtn{width:auto;height:62px;padding:0 16px;border-radius:18px;flex-direction:row;gap:8px;font-size:13px}
+.player .qbtn svg{width:19px;height:19px}
+/* gesto de volver desde el borde */
+.edge{transition:none !important}
+.edge-end{transition:transform .26s var(--out) !important}
+/* Tú: "usar la app anterior", discreto al final */
+a.opt{color:inherit;text-decoration:none}
+a.opt.quiet{opacity:.7}
+.opt input[type=checkbox]{-webkit-appearance:none;appearance:none;flex:none;width:48px!important;height:29px!important;margin:0;border-radius:15px;background:rgba(255,255,255,.16);position:relative;transition:background .25s}
+.opt input[type=checkbox]:after{content:"";position:absolute;left:3px;top:3px;width:23px;height:23px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:transform .3s var(--spring)}
+.opt input[type=checkbox]:checked{background:var(--vio)}
+.opt input[type=checkbox]:checked:after{transform:translateX(19px)}

@@ -806,7 +806,6 @@
     h += '<div class="sec"><button class="opt" type="button" data-a="entry"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Cambiar de modo</b><small>' + (S.mode === 'solo' ? 'Pasar a LAPAJA (Discord)' : 'Pasar al modo solo') + '</small></span>' + I.chev.replace('<svg', '<svg width="16" height="16" style="color:var(--mut)"') + '</button>' +
       '<button class="opt" type="button" data-a="rename"><span class="oi">' + I.pen + '</span><span style="flex:1"><b>Cambiar mi nombre</b><small>Así te ven los demás</small></span></button>' +
       '<label class="opt"><span class="oi">' + I.phones + '</span><span style="flex:1"><b>Recordar cómo entro</b><small>Abrir directo en el último modo</small></span><input type="checkbox" data-a="remember"' + (LS.get('m3.remember', true) ? ' checked' : '') + ' style="width:20px;height:20px;accent-color:#8E6CF2"></label>' +
-      '<a class="opt" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
       '<button class="opt" type="button" data-a="status"><span class="oi">' + I.cpu + '</span><span style="flex:1"><b>Estado del servidor</b><small>' + esc(S.status ? 'Versión ' + ((S.status.versions || {}).server || '?') : 'Cómo va la VM') + '</small></span>' + I.chev.replace('<svg', '<svg width="16" height="16" style="color:var(--mut)"') + '</button></div>';
     h += '<div class="sec"><div class="sec-h"><h2 class="h2">Tu Wrapped</h2></div><div class="seg">' + [['week', 'Semana'], ['month', 'Mes'], ['year', 'Año'], ['all', 'Siempre']].map((p) => '<button type="button" class="' + (S.statsPeriod === p[0] ? 'on' : '') + '" data-a="speriod" data-p="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>' +
       '<div class="seg" style="margin-top:8px"><button type="button" class="' + (!S.statsMine ? 'on' : '') + '" data-a="smine" data-m="0">Todo el grupo</button><button type="button" class="' + (S.statsMine ? 'on' : '') + '" data-a="smine" data-m="1">Solo yo</button></div>';
@@ -818,6 +817,7 @@
       if ((st.top_artists || []).length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Artistas</h2></div><div class="hs">' + st.top_artists.map((a) => '<span class="card art"><span class="radio-av" style="' + bgi(a.art_url) + '"></span><span class="ct" style="text-align:center">' + esc(a.name) + '</span><span class="cs" style="text-align:center">' + a.plays + ' veces</span></span>').join('') + '</div></div>';
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
+    h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a></div>';
     return h + '</div>';
   }
 
@@ -923,6 +923,7 @@
     if (!S.mode) { renderEntry(); return; }
     renderTabs(); renderMini(); renderBg(); renderScreen(force);
     if (S.playerOpen) renderPlayer();
+    if (S.playerOpen || $('lyr').classList.contains('on')) askLyrics();
     if (S.sheet === 'queue') renderQueue();
     if (S.sheet === 'room') renderRoom();
   }
@@ -975,14 +976,16 @@
     const mem = room ? roomMembers(room) : [];
     const k = JSON.stringify([np.title, np.art_url, np.paused, v.repeat, v.radio, v.canPrev, room, mem.map((m) => m.name), v.queue.length, S.mode, liked(np)]);
     el.classList.toggle('is-paused', !!np.paused);
+    if (!$('pbody')) el.innerHTML = '<span class="pbg2" id="pbg2"></span><div class="pl-wall" id="pwall"></div><div class="pl-body" id="pbody"></div>';
+    setWall(np.art_url);
     if (!force && k === plKey) return;
     plKey = k;
     const from = S.mode === 'solo' ? (E.follow ? 'Sala de ' + (E.follow === '@discord' ? 'LAPAJA' : E.follow) : 'Tu celular') : 'LAPAJA · Discord';
-    el.innerHTML = '<span class="pbg2" style="' + bgi(np.art_url) + '"></span>' +
-      '<div class="sgrab" data-drag="player" style="padding:2px 0 6px"><span class="grab"></span></div>' +
+    $('pbody').innerHTML = '<div class="sgrab" data-drag="player" style="padding:2px 0 6px"><span class="grab"></span></div>' +
       '<div class="pl-top"><button class="ib" type="button" data-a="closePlayer" aria-label="Bajar">' + I.down + '</button><div class="ctr"><div class="k">' + (S.mode === 'solo' ? 'SONANDO EN' : 'SONANDO EN') + '</div><div class="f ell">' + esc(from) + '</div></div>' +
       '<button class="ib" type="button" data-a="openQueue" aria-label="Playlist">' + I.list + '</button></div>' +
-      '<div class="pl-art" style="' + bgi(np.art_url) + '">' + (room ? '<button class="pl-room" type="button" data-a="openRoom">' + stackHtml(mem, 3).replace(/class="av"/g, 'class="av flo"') + '<span>' + (room === S.me ? 'Tu sala' : 'Sala de ' + esc(room === '@discord' ? 'LAPAJA' : room)) + '</span></button>' : '') + '</div>' +
+      '<div class="pl-space"></div>' +
+      (room ? '<div class="pl-roomrow"><button class="pl-room" type="button" data-a="openRoom">' + stackHtml(mem, 3).replace(/class="av"/g, 'class="av flo"') + '<span>' + (room === S.me ? 'Tu sala' : 'Sala de ' + esc(room === '@discord' ? 'LAPAJA' : room)) + '</span></button></div>' : '') +
       '<div class="pl-info"><div style="flex:1;min-width:0"><div class="t ell">' + esc(np.title) + '</div><div class="a ell">' + esc(np.uploader || '') + (S.mode !== 'solo' && np.who ? ' · la puso ' + esc(np.who) : '') + '</div></div>' +
       '<button class="heart" type="button" data-a="heartNow" aria-label="Guardar en un disco">' + (liked(np) ? I.heartF : I.heart) + '</button></div>' +
       '<div class="seek" id="seek"><div class="bar" id="sbar"><span class="fill" id="sfill"></span><span class="knob" id="sknob"></span></div><div class="tm"><span id="tnow">0:00</span><span id="tdur">' + fmt(np.duration) + '</span></div></div>' +
@@ -991,11 +994,29 @@
       '<button class="cb play" type="button" data-a="toggle" aria-label="' + (np.paused ? 'Seguir' : 'Pausar') + '">' + (np.paused ? I.play : I.pause) + '</button>' +
       '<button class="cb" type="button" data-a="skip" aria-label="Siguiente">' + I.next + '</button>' +
       '<button class="cb sm' + (v.repeat !== 'off' ? ' on' : ' dim') + '" type="button" data-a="repeat" aria-label="Repetir">' + (v.repeat === 'one' ? I.rep1 : I.rep) + '</button></div>' +
-      '<div class="pl-low"><button class="lycard" type="button" data-a="openLyrics"><span class="k"><span>LETRA</span><span style="color:var(--mint)">' + (S.lyr.lines ? 'Karaoke' : '') + '</span></span><span class="l1 ell" id="ly1">' + esc(lyLine(0)) + '</span><span class="l2 ell" id="ly2">' + esc(lyLine(1)) + '</span></button>' +
-      '<button class="qbtn" type="button" data-a="openQueue">' + I.list + 'Playlist' + (v.queue.length ? ' · ' + v.queue.length : '') + '</button></div>';
+      '<div class="pl-low"><button class="lycard" type="button" data-a="openLyrics"><span class="k"><span>LETRA</span><span style="color:var(--mint)">' + (S.lyr.lines ? 'Karaoke' : '') + '</span></span><span class="l1 ell" id="ly1">' + esc(lyLine(0)) + '</span><span class="l2 ell hide" id="ly2"></span></button>' +
+      '<button class="qbtn" type="button" data-a="openQueue">' + I.list + '<span>Lista' + (v.queue.length ? ' · ' + v.queue.length : '') + '</span></button></div>';
     tick();
   }
   function liked() { return false; }
+  // la portada de fondo: al cambiar de canción, la nueva aparece suave encima
+  function setWall(url) {
+    const w = $('pwall'), b = $('pbg2');
+    if (!w) return;
+    const k = url || '';
+    if (w.dataset.k === k) return;
+    w.dataset.k = k;
+    const css = url ? "url('" + String(url).replace(/'/g, '%27') + "')" : '';
+    if (b) b.style.backgroundImage = css;
+    const d = document.createElement('div');
+    d.className = 'wimg';
+    d.style.backgroundImage = css;
+    w.appendChild(d);
+    void d.offsetWidth;
+    d.classList.add('on');
+    const old = Array.from(w.children).filter((x) => x !== d);
+    setTimeout(() => old.forEach((x) => x.remove()), 1100);
+  }
 
   // barra de progreso (se mueve sola)
   let seeking = null;
@@ -1038,22 +1059,25 @@
 
   /* ======================= letra ======================= */
   function lyKey(np) { return np ? np.webpage_url || np.title : null; }
-  function askLyrics() {
+  function askLyrics(retry) {
     const np = PV().np;
     const k = lyKey(np);
-    if (!np || S.lyr.key === k) return;
-    S.lyr = { key: k, lines: null, plain: null, found: false, loading: true, tries: 0 };
+    if (!np || (!retry && S.lyr.key === k)) return;
+    S.lyr = { key: k, lines: null, plain: null, found: false, loading: true, tries: retry && S.lyr.key === k ? S.lyr.tries : 0 };
+    lastLy = -2; plKey = '';
+    if (S.playerOpen) renderPlayer(true);
+    if ($('lyr').classList.contains('on')) renderLyrics();
     if (S.mode === 'solo') cmd('lyrics', { webpage_url: np.webpage_url, title: np.title, uploader: np.uploader, duration: np.duration });
     else cmd('lyrics');
   }
   function onLyrics(d) {
     const np = PV().np;
-    if (!np || (d.webpage_url && np.webpage_url && d.webpage_url !== np.webpage_url)) return;
-    if (d.pending && (S.lyr.tries || 0) < 5) { S.lyr.tries = (S.lyr.tries || 0) + 1; setTimeout(() => { S.lyr.key = null; askLyrics(); }, 2500); return; }
+    if (!np || lyKey(np) !== S.lyr.key || (d.webpage_url && np.webpage_url && d.webpage_url !== np.webpage_url)) return;
+    if (d.pending && (S.lyr.tries || 0) < 5) { S.lyr.tries = (S.lyr.tries || 0) + 1; const k0 = S.lyr.key; setTimeout(() => { if (S.lyr.key === k0) askLyrics(true); }, 2500); return; }
     S.lyr.loading = false; S.lyr.found = !!d.found;
     S.lyr.lines = d.synced ? parseLrc(d.synced) : null;
     S.lyr.plain = d.plain || null;
-    plKey = '';
+    plKey = ''; lastLy = -2;
     if (S.playerOpen) renderPlayer(true);
     if ($('lyr').classList.contains('on')) renderLyrics();
   }
@@ -1437,8 +1461,64 @@
     else if (e.target.id === 'txIn') { e.preventDefault(); A.txOk(); }
     else if (e.target.id === 'nmIn') { e.preventDefault(); A.setName(); }
   });
-  window.addEventListener('popstate', () => { if (S.playerOpen) closePlayer(); else if (S.sheet) closeSheet(); else if (S.stack.length) pop(); history.pushState(null, ''); });
-  history.pushState(null, '');
+  function goBack() {
+    if ($('lyr').classList.contains('on')) { $('lyr').classList.remove('on'); return true; }
+    if (S.sheet) { closeSheet(); return true; }
+    if (S.playerOpen) { closePlayer(); return true; }
+    if (S.stack.length) { pop(); return true; }
+    return false;
+  }
+  // Android: el botón de atrás. En iPhone no se usa el historial (el gesto del
+  // sistema dejaba la pantalla en blanco unos segundos); va el gesto de abajo.
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!IOS) {
+    window.addEventListener('popstate', () => { goBack(); history.pushState(null, ''); });
+    history.pushState(null, '');
+  }
+  // deslizar desde el borde izquierdo hacia adentro = volver
+  (function () {
+    let g = null;
+    const layer = () => ($('lyr').classList.contains('on') ? $('lyr') : S.sheet ? $('sheet') : S.playerOpen ? $('player') : S.stack.length ? $('screen') : null);
+    document.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      if (e.touches.length !== 1 || t.clientX > 28) return;
+      const el = layer();
+      if (!el) return;
+      g = { el: el, x0: t.clientX, y0: t.clientY, dx: 0, on: false, t0: performance.now() };
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!g) return;
+      const t = e.touches[0], dx = t.clientX - g.x0, dy = t.clientY - g.y0;
+      if (!g.on) {
+        if (Math.abs(dy) > 14 && Math.abs(dy) > dx) { g = null; return; }
+        if (dx < 10) return;
+        g.on = true; g.el.classList.add('edge');
+      }
+      g.dx = Math.max(0, dx);
+      g.el.style.transform = 'translateX(' + g.dx + 'px)';
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    const end = () => {
+      if (!g) return;
+      const w = g; g = null;
+      if (!w.on) return;
+      const fast = w.dx / Math.max(1, performance.now() - w.t0) > 0.6 && w.dx > 50;
+      const go = w.dx > innerWidth * 0.3 || fast;
+      w.el.classList.remove('edge');
+      w.el.classList.add('edge-end');
+      w.el.style.transform = go ? 'translateX(' + innerWidth + 'px)' : '';
+      setTimeout(() => {
+        w.el.classList.remove('edge-end');
+        w.el.classList.add('edge');
+        if (go) goBack();
+        w.el.style.transform = '';
+        void w.el.offsetWidth;
+        w.el.classList.remove('edge');
+      }, 260);
+    };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+  })();
 
   /* ======================= avisitos ======================= */
   let toastT = null;

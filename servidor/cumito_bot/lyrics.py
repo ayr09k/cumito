@@ -97,7 +97,8 @@ def fetch(title: str, artist: str | None, duration: int | None) -> dict:
             continue
         def score(r):
             d = abs((r.get("duration") or 0) - (duration or r.get("duration") or 0))
-            return (0 if r.get("syncedLyrics") else 1, d if d <= 8 else 100 + d)
+            # primero que dure casi lo mismo (si no, suele ser otra canción); después, que tenga tiempos
+            return (0 if d <= 8 else 1, 0 if r.get("syncedLyrics") else 1, d)
         rows.sort(key=score)
         top = rows[0]
         if duration and abs((top.get("duration") or 0) - duration) > 15 and best is None:
