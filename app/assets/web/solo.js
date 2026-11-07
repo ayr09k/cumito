@@ -83,10 +83,19 @@
     prefetch();
     if (O.radio && O.q.length < 2 && !O.follow) fetchRadio(t, false, false);
   }
+  // avisos al servidor para poder ver qué pasa en el celular (journalctl -u cumito)
+  function slog(ev, extra) { try { rs('solo_log', Object.assign({ ev: ev, hidden: document.hidden, t: (O.cur && O.cur.title) || null }, extra || {})); } catch (e) {} }
   function load(t) {
     O.loadingUid = t.uid;
     audio.src = t.src;
-    if (O.want) audio.play().catch(() => { if (O.cur === t) { O.want = false; refresh(); toast('Toca ▶ para empezar'); } });
+    if (O.want) audio.play().catch((err) => {
+      if (O.cur !== t) return;
+      slog('play-fail', { err: String(err && err.name) });
+      // con la pantalla apagada algunos celulares no dejan empezar otra: se
+      // intenta otra vez apenas vuelves a la app
+      if (document.hidden) { O.pendingPlay = true; return; }
+      O.want = false; refresh(); toast('Toca ▶ para empezar');
+    });
   }
   function fetchTrack(t, pre) {
     if (t.asking === (pre ? 'pre' : 'now') || t.asking === 'now') return;
@@ -470,6 +479,7 @@
   function finished() {
     if (!O.cur || endedUid === O.cur.uid) return;   // una sola vez por canción
     endedUid = O.cur.uid;
+    slog('ended', { q: O.q.length, next_ready: !!(O.q[0] && O.q[0].src) });
     if (O.follow) {
       // espera a que la otra persona pase a la siguiente; si en unos segundos no
       // llega nada (se le apagó el celular), sigue con tu lista
@@ -494,7 +504,9 @@
     if (audio.ended || (audio.paused && audio.readyState >= 2 && atEnd())) finished();
   }, 2000);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && O.on && O.cur && O.want && (audio.ended || atEnd())) finished();
+    if (document.hidden || !O.on || !O.cur) return;
+    if (O.pendingPlay && O.want) { O.pendingPlay = false; audio.play().catch(() => { O.want = false; refresh(); }); return; }
+    if (O.want && (audio.ended || atEnd())) finished();
   });
   audio.addEventListener('error', () => {
     if (isSilent() || !O.on || !O.cur) return;

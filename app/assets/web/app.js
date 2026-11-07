@@ -434,21 +434,30 @@ const DRAG = { on: false };
   $('qscroll').addEventListener('pointerdown', (e) => {
     const row = e.target.closest('#readyBox .qrow');
     if (!row || e.target.closest('.qx') || e.button !== 0) return;
-    if (e.pointerType === 'touch' && !e.target.closest('.grip')) return;   // con el dedo, desde los puntitos
-    start = { row: row, x: e.clientX, y: e.clientY, id: e.pointerId, t: Date.now() };
+    // con el dedo solo se arrastra desde los puntitos (si no, se mueve la lista);
+    // pero un toque en cualquier parte de la fila sí la pone
+    const canDrag = e.pointerType !== 'touch' || !!e.target.closest('.grip');
+    start = { row: row, x: e.clientX, y: e.clientY, id: e.pointerId, t: Date.now(), canDrag: canDrag };
   });
   window.addEventListener('pointermove', (e) => {
-    if (start && !DRAG.on && (Math.abs(e.clientY - start.y) > 5)) begin(e);
+    if (start && !DRAG.on && (Math.abs(e.clientY - start.y) > 5 || Math.abs(e.clientX - start.x) > 8)) {
+      if (start.canDrag) begin(e); else start = null;   // era para desplazar la lista
+    }
     if (DRAG.on) move(e);
   });
+  const tapRow = (e) => {
+    if (start && start.row.contains(e.target) && Date.now() - start.t < 600) qcmd('play_index', +start.row.dataset.uid);
+  };
   window.addEventListener('pointerup', (e) => {
     if (DRAG.on) { finish(false); start = null; return; }
-    if (start && Math.abs(e.clientY - start.y) <= 5 && start.row.contains(e.target)) qcmd('play_index', +start.row.dataset.uid);
+    if (start && Math.abs(e.clientY - start.y) <= 5) tapRow(e);
     start = null;
   });
+  window.addEventListener('pointercancel', () => { if (DRAG.on) finish(true); start = null; });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && DRAG.on) { finish(true); start = null; e.stopPropagation(); } }, true);
   function begin(e) {
     const rows = Array.from(box().children);
+    rows.forEach((x) => { x.style.animation = 'none'; });
     const r = start.row.getBoundingClientRect();
     const wr = W.getBoundingClientRect();
     DRAG.on = true; DRAG.rows = rows; DRAG.from = rows.indexOf(start.row); DRAG.to = DRAG.from;
@@ -501,6 +510,51 @@ const DRAG = { on: false };
     renderQueue(true);
     $('qscroll').querySelectorAll('.qrow').forEach((r) => (r.style.animation = 'none'));
   }
+})();
+
+/* arrastrar la ventana de la playlist hacia abajo para cerrarla (como en el cel) */
+(function () {
+  const sh = $('sheet'), qs = $('qscroll');
+  let d = null, justDragged = 0;
+  const okStart = (t) => has('is-sheet') && !t.closest('.grip, .qx, .sheet-acts button, input, [data-hold]');
+  function beginAt(y, inList) { d = { y0: y, t0: performance.now(), h: sh.getBoundingClientRect().height, on: false, inList: inList, dy: 0 }; }
+  function moveTo(y) {
+    if (!d || DRAG.on) return false;
+    const dy = y - d.y0;
+    if (!d.on) {
+      if (dy > 8 && (!d.inList || qs.scrollTop <= 0)) { d.on = true; d.y0 = y; d.t0 = performance.now(); sh.style.transition = 'none'; }
+      else if (Math.abs(dy) > 8) { d = null; return false; }
+      else return false;
+    }
+    d.dy = Math.max(0, y - d.y0);
+    sh.style.transform = 'translateY(' + d.dy + 'px)';
+    return true;
+  }
+  function end() {
+    if (!d) return;
+    const w = d; d = null;
+    if (!w.on) return;
+    justDragged = Date.now();
+    sh.style.transition = '';
+    const v = w.dy / Math.max(1, performance.now() - w.t0);
+    sh.style.transform = '';
+    if (w.dy > w.h * 0.25 || (v > 0.7 && w.dy > 40)) closeSheet();
+  }
+  sh.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || !okStart(e.target)) return;
+    beginAt(e.touches[0].clientY, !!e.target.closest('#qscroll'));
+  }, { passive: true });
+  sh.addEventListener('touchmove', (e) => { if (d && moveTo(e.touches[0].clientY) && e.cancelable) e.preventDefault(); }, { passive: false });
+  sh.addEventListener('touchend', end);
+  sh.addEventListener('touchcancel', end);
+  // con el mouse, desde la parte de arriba de la ventana
+  sh.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0 || !okStart(e.target) || e.target.closest('#qscroll')) return;
+    beginAt(e.clientY, false);
+  });
+  window.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch' && d) moveTo(e.clientY); });
+  window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') end(); });
+  sh.addEventListener('click', (e) => { if (Date.now() - justDragged < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
 })();
 
 /* ======================= buscador ======================= */
@@ -720,7 +774,13 @@ document.addEventListener('pointerdown', (e) => {
   if (!b || e.button !== 0) return;
   e.preventDefault();
   HOLD.el = b; HOLD.at = Date.now();
-  b.classList.add('holding'); b.classList.remove('nudge');
+  HOLD.alt = !HOLD.alt;
+  b.classList.remove('nudge', 'holding', 'boom');
+  b.style.setProperty('--amp', '0');
+  void b.offsetWidth;   // que la animación empiece de cero
+  b.style.removeProperty('--amp');
+  b.classList.toggle('alt', HOLD.alt);
+  b.classList.add('holding');
   const span = b.querySelector('span'); if (span && !b.dataset.txt) b.dataset.txt = span.textContent;
   if (span) span.textContent = b.classList.contains('hold') ? 'Sigue presionando…' : 'Mantén…';
   clearTimeout(HOLD.t);

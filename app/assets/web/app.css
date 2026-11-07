@@ -458,6 +458,11 @@ body{width:360px;height:600px}
 .holding .hold,.hold.holding{animation:amp 2s cubic-bezier(.7,0,1,1) forwards,shake .06s linear infinite;background:rgba(228,70,75,calc(.18 + var(--amp) * .09))}
 @keyframes amp{0%{--amp:0}100%{--amp:5}}
 @keyframes shake{0%{transform:translate(calc(var(--amp) * .9px),calc(var(--amp) * -.5px)) rotate(calc(var(--amp) * .35deg))}25%{transform:translate(calc(var(--amp) * -1px),calc(var(--amp) * .6px)) rotate(calc(var(--amp) * -.4deg))}50%{transform:translate(calc(var(--amp) * .7px),calc(var(--amp) * .7px)) rotate(calc(var(--amp) * .3deg))}75%{transform:translate(calc(var(--amp) * -.8px),calc(var(--amp) * -.6px)) rotate(calc(var(--amp) * -.35deg))}100%{transform:translate(calc(var(--amp) * .9px),calc(var(--amp) * -.5px)) rotate(calc(var(--amp) * .35deg))}}
+/* cada vez que se mantiene presionado se alternan dos copias de la animación:
+   algunos celulares no la vuelven a correr si es la misma de la vez anterior */
+@keyframes amp2{0%{--amp:0}100%{--amp:5}}
+@keyframes shake2{0%{transform:translate(calc(var(--amp) * .9px),calc(var(--amp) * -.5px)) rotate(calc(var(--amp) * .35deg))}25%{transform:translate(calc(var(--amp) * -1px),calc(var(--amp) * .6px)) rotate(calc(var(--amp) * -.4deg))}50%{transform:translate(calc(var(--amp) * .7px),calc(var(--amp) * .7px)) rotate(calc(var(--amp) * .3deg))}75%{transform:translate(calc(var(--amp) * -.8px),calc(var(--amp) * -.6px)) rotate(calc(var(--amp) * -.35deg))}100%{transform:translate(calc(var(--amp) * .9px),calc(var(--amp) * -.5px)) rotate(calc(var(--amp) * .35deg))}}
+.holding.alt .hold,.hold.holding.alt,.hold2.holding.alt{animation-name:amp2,shake2}
 .boom .hold,.hold.boom{animation:boom .5s var(--out)}
 @keyframes boom{0%{background:rgba(255,255,255,.9);box-shadow:0 0 0 0 rgba(255,90,95,.7)}100%{box-shadow:0 0 0 26px rgba(255,90,95,0)}}
 .nudge{animation:nudge .35s linear}
@@ -551,7 +556,19 @@ html.mobile .pvs{height:calc(100dvh - 52px - var(--st));padding-bottom:calc(18px
 html.mobile .confirm,html.mobile .card2{top:calc(150px + var(--st))!important}
 html.mobile .toast{bottom:calc(200px + var(--sb))}
 html.mobile .banner{display:none}
-html.mobile .qrow .grip{touch-action:none;padding:8px 6px}
+html.mobile .qrow .grip{touch-action:none;padding:10px 8px}
+html.mobile .qrow .grip svg{width:15px;height:22px}
+html.mobile .qrow{padding:8px 9px;gap:11px}
+html.mobile .qrow .qc{width:44px;height:44px;border-radius:11px}
+html.mobile .qrow .qt{font-size:14.5px}
+html.mobile .qrow .qa{font-size:12px}
+html.mobile .qrow .qd{font-size:11.5px}
+html.mobile .qrow .qx{width:36px;height:36px;border-radius:18px}
+html.mobile .qrow .qx svg{width:16px;height:16px}
+html.mobile .qnow .qc{width:42px!important;height:42px!important}
+html.mobile .danger-pill,html.mobile .radio-pill{height:34px;padding:0 14px;font-size:12.5px;border-radius:17px}
+html.mobile .grab{width:120px;height:28px}
+html.mobile .sheet .grab span{width:46px}
 @media (hover:none){
   .th,.qrow .qx,.playdot{opacity:1!important;transform:none!important}
   .btn:hover,.card:hover,.tile:hover,.pill:hover,.pill2:hover{transform:none}

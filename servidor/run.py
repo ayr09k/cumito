@@ -193,6 +193,9 @@ class CumitoServer:
             # modo solo: pueden tardar unos segundos, así que van aparte para no
             # frenar lo demás que mande ese mismo celular
             asyncio.create_task(self._solo_command(action, data, ws))
+        elif action == "solo_log":
+            logging.getLogger("cumito.solo").info("celular de %s: %s", who,
+                                                  {k: str(v)[:80] for k, v in data.items() if k not in ("type", "action")})
         elif action == "solo_status":
             await self.solo.status(who, data)
         elif action == "playlist_preview":

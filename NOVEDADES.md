@@ -1,3 +1,9 @@
+## Cumito 2.2.6
+
+- Arreglado: la primera vez que arrastras una canción de la playlist, las demás ahora sí se abren para hacerle espacio.
+- Arreglado: "Borrar lista" vibra igual cada vez que lo mantienes presionado.
+- Nuevo: puedes bajar la ventana de la playlist arrastrándola desde arriba para cerrarla.
+
 ## Cumito 2.2.5
 
 - **Radio en la playlist:** arriba, junto a "Borrar lista", hay un disquito para prender o apagar la radio al toque (gira cuando está prendida).
