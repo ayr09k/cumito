@@ -106,25 +106,32 @@ class Solo:
             self.on_change()
 
     # ---------- dejar una canción lista para el celular ----------
-    async def get(self, url: str, title: str | None = None, pre: bool = False) -> dict:
+    async def ensure_file(self, url: str, title: str | None = None, pre: bool = False):
+        """Deja la canción bajada en el disco. Devuelve (ruta, info) o (None, error)."""
         from .bot import extract
         if not url:
-            return {"error": "Falta la canción"}
-        if not audio_cache.publishes():
-            return {"error": "El modo solo no está activado en el servidor"}
+            return None, "Falta la canción"
         path = audio_cache.ready_path({"webpage_url": url})
         info = {}
         if path is None:
             try:
                 info = await extract(url, title_hint=title, urgent=not pre)
             except Exception as e:
-                return {"error": f"No pude obtener esa canción: {str(e)[:120]}"}
+                return None, f"No pude obtener esa canción: {str(e)[:120]}"
             path = audio_cache.ready_path(info) or await audio_cache.fetch(info, urgent=not pre)
             if path is None:
-                return {"error": "No pude bajar esa canción"}
+                return None, "No pude bajar esa canción"
             # el enlace con que se pidió también la encuentra la próxima vez
             if info.get("webpage_url") != url:
                 audio_cache.alias(url, path)
+        return path, info
+
+    async def get(self, url: str, title: str | None = None, pre: bool = False) -> dict:
+        if not audio_cache.publishes():
+            return {"error": "El modo solo no está activado en el servidor"}
+        path, info = await self.ensure_file(url, title, pre)
+        if path is None:
+            return {"error": info}
         out = {"src": audio_cache.public_src(path)}
         for k in ("title", "uploader", "duration", "art_url", "webpage_url"):
             if info.get(k):

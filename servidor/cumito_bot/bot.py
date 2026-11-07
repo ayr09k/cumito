@@ -30,6 +30,21 @@ from .lanes import LANES
 
 log = logging.getLogger("cumito.bot")
 
+_SSR = {"at": 0.0, "ok": False}
+
+
+def _solo_stream_ready() -> bool:
+    """¿Caddy ya le pasa /solo/ al servidor? (lo agrega auto_actualizar.sh)"""
+    now = time.time()
+    if now - _SSR["at"] > 60:
+        _SSR["at"] = now
+        try:
+            _SSR["ok"] = "/solo/" in Path("/etc/caddy/Caddyfile").read_text()
+        except OSError:
+            _SSR["ok"] = False
+    return _SSR["ok"]
+
+
 def ffmpeg_path() -> str:
     p = shutil.which("ffmpeg")
     if p:
@@ -455,7 +470,7 @@ class BotCore:
             "activity_last": self.activity[-1] if self.activity else None,
             # 2.0 (las apps viejas no los miran)
             "server_v": 2,
-            "features": self.FEATURES + (["solo"] if audio_cache.publishes() else []),
+            "features": self.FEATURES + (["solo"] if audio_cache.publishes() else []) + (["solo_stream"] if _solo_stream_ready() else []),
             "repeat": self.repeat,
             "radio": self.radio,
             "normalize": self.normalize,

@@ -70,6 +70,7 @@ class CumitoServer:
         from cumito_bot.bot import BotCore
         from cumito_bot.salud import Salud
         from cumito_bot.solo import Solo
+        from cumito_bot.solostream import SoloStreams
         self.salud = Salud()
         self.relay = RelayServer(RELAY_PORT, on_command=self._on_relay_command)
         self.bot = BotCore(
@@ -79,6 +80,7 @@ class CumitoServer:
             on_change=self._on_change,
         )
         self.solo = Solo(self.bot, self._on_change)
+        self.solostreams = SoloStreams(self.solo, self._reply)
 
     def _on_change(self):
         snap = self.bot.snapshot()
@@ -193,6 +195,14 @@ class CumitoServer:
             # modo solo: pueden tardar unos segundos, así que van aparte para no
             # frenar lo demás que mande ese mismo celular
             asyncio.create_task(self._solo_command(action, data, ws))
+        elif action == "solo_play":
+            asyncio.create_task(self.solostreams.play(who, ws, data))
+        elif action == "solo_plan":
+            self.solostreams.plan(who, ws, data)
+        elif action in ("solo_pause", "solo_resume"):
+            self.solostreams.pause(who, data, action == "solo_pause")
+        elif action == "solo_stop":
+            self.solostreams.stop(who, data)
         elif action == "solo_log":
             logging.getLogger("cumito.solo").info("celular de %s: %s", who,
                                                   {k: str(v)[:80] for k, v in data.items() if k not in ("type", "action")})
@@ -287,6 +297,7 @@ class CumitoServer:
     async def run(self):
         asyncio.create_task(self.salud.run())
         asyncio.create_task(self.solo.sweep())
+        await self.solostreams.start()
         from cumito_bot.lanes import LANES
         LANES.warm()
         await self.relay.start()

@@ -11,7 +11,7 @@
     set(k, v) { try { localStorage.setItem('cumito.' + k, JSON.stringify(v)); } catch (e) {} },
   };
   const KNOWN = ['search_results', 'playlist_preview', 'activity_list', 'status', 'lyrics', 'stats', 'albums', 'album',
-    'album_cover', 'album_added', 'error', 'solo_ready', 'solo_tracks', 'recs'];
+    'album_cover', 'album_added', 'error', 'solo_ready', 'solo_tracks', 'recs', 'solo_stream', 'solo_seg', 'solo_plan_add', 'solo_end'];
   const ev = (t, d) => T.onEvent(t, JSON.stringify(d));
   let name = LS.get('name', '');
   let ws = null, alive = false, wait = 1000, timer = null;

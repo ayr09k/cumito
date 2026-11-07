@@ -46,6 +46,10 @@ $HOST {
 	reverse_proxy @ws 127.0.0.1:8765
 	redir / /web/ 302
 	header /web/* Cache-Control "no-cache"
+	@solo path /solo/*
+	reverse_proxy @solo 127.0.0.1:8766 {
+		flush_interval -1
+	}
 	@m4a path /audio/*.m4a
 	header @m4a Content-Type audio/mp4
 	header /audio/* Cache-Control "public, max-age=604800"

@@ -52,6 +52,19 @@ if [ -d /var/www/cumito ]; then
     fi
     rm -f "$NUEVO_CF"
   fi
+  # modo solo como transmisión continua: Caddy le pasa /solo/ al servidor
+  if [ -f "$CF" ] && ! grep -q "/solo/" "$CF"; then
+    NUEVO_CF="$(mktemp)"
+    awk '/^\troot \* /{print "\t@solo path /solo/*"; print "\treverse_proxy @solo 127.0.0.1:8766 {"; print "\t\tflush_interval -1"; print "\t}"} {print}' "$CF" > "$NUEVO_CF"
+    if caddy validate --adapter caddyfile --config "$NUEVO_CF" >/dev/null 2>&1; then
+      install -m 644 "$NUEVO_CF" "$CF"
+      systemctl reload caddy || true
+      echo "Caddy: agregado /solo/ (transmisión del modo solo)"
+    else
+      echo "Caddy: no se pudo validar el Caddyfile con /solo/; se deja como estaba"
+    fi
+    rm -f "$NUEVO_CF"
+  fi
 fi
 
 # 2) ¿qué cambió? (sin copiar nada todavía)

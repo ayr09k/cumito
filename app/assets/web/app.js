@@ -86,6 +86,10 @@ const HANDLERS = {
   update(d) { renderBanner(d); },
   solo_ready(d) { if (window.SOLO) SOLO.onReady(d); },
   solo_tracks(d) { if (window.SOLO) SOLO.onTracks(d); },
+  solo_stream(d) { if (window.SOLO) SOLO.onStream(d); },
+  solo_seg(d) { if (window.SOLO) SOLO.onSeg(d); },
+  solo_plan_add(d) { if (window.SOLO) SOLO.onPlanAdd(d); },
+  solo_end(d) { if (window.SOLO) SOLO.onEnd(d); },
   recs(d) { if (window.SOLO) SOLO.onRecs(d); },
   cover_picked(d) { if (d.b64) { AL.edit.cover = d.b64; AL.edit.remove = false; renderAlbums(); } else if (d.error) toast(d.error); },
 };

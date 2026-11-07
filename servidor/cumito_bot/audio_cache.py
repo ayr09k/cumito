@@ -94,7 +94,7 @@ def ready_path(track) -> Path | None:
     if not k:
         return None
     for p in DIR.glob(k + ".*"):
-        if p.suffix == ".part":
+        if p.suffix in (".part", ".adts"):   # .adts: la copia para el modo solo (solostream)
             continue
         try:
             p.touch()   # recién usada: la última en borrarse
