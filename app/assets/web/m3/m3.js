@@ -93,6 +93,9 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17.5a3 3 0 1 1-2-2.8V4l12-2v12.5a3 3 0 1 1-2-2.8V6.4L9 7.8z"/></svg>',
+    arrowR: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M13 7l5 5-5 5"/></svg>',
+    fire: '<svg viewBox="0 0 24 24" fill="#F2A33A"><path d="M12 2c1 4 5 5.5 5 10.5A5 5 0 0 1 7 12.5c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg>',
+    star: '<svg viewBox="0 0 24 24" fill="#A8E6F5"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>',
     link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
   };
 
@@ -107,6 +110,7 @@
     lyr: { key: null, lines: null, plain: null, found: false, loading: false },
     stats: null, statsPeriod: 'month', statsMine: false, status: null,
     playerOpen: false, sheet: null, recent: LS.get('recent', []),
+    favs: LS.get('m3.favs', []), asks: [], askRes: null, askQ: '',
   };
 
   /* ======================= conexión ======================= */
@@ -115,7 +119,7 @@
     if (!S.me || (ws && ws.readyState <= 1)) return;
     clearTimeout(wsTimer);
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-    ws.onopen = () => { wsAlive = true; wsWait = 1000; ws.send(JSON.stringify({ type: 'hello', name: S.me })); S.conn = true; onConnected(); };
+    ws.onopen = () => { wsAlive = true; wsWait = 1000; ws.send(JSON.stringify({ type: 'hello', name: S.me, caps: ['m3'] })); S.conn = true; onConnected(); };
     ws.onmessage = (m) => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } onMsg(d); };
     ws.onclose = () => {
       if (wsAlive) { S.conn = false; render(); }
@@ -133,6 +137,7 @@
 
   function onConnected() {
     cmd('album_list');
+    cmd('fav_list');
     if (E.on && E.cur) { E.report(false); E.sendPlan(); }
     render();
   }
@@ -142,10 +147,13 @@
       const prevRev = S.g.albums_rev;
       S.g = Object.assign({}, S.g, d); S.gAt = performance.now(); S.conn = true;
       if (d.albums_rev !== undefined && d.albums_rev !== prevRev) cmd('album_list');
+      if (S.followDiscordAt) tryFollowDiscord();
       E.onGroup();
       render();
     },
-    cat_results(d) { if (d.query !== S.search.q || d.kind !== S.search.kind) return; S.search.res = d; S.search.loading = false; renderScreen(); },
+    cat_results(d) {
+      if (d.tag === 'ask') { if (d.query === S.askQ) { S.askRes = d.results || []; renderAsk(); } return; }
+      if (d.query !== S.search.q || d.kind !== S.search.kind) return; S.search.res = d; S.search.loading = false; renderScreen(); },
     cat_error(d) { if (d.action === 'cat_search') { S.search.loading = false; S.search.res = { error: true }; } if (d.action === 'home_feed') S.feed.loading = false; toast(d.message || 'No pude cargar eso'); renderScreen(); },
     artist(d) { const p = top(); if (p && p.type === 'artist' && p.id === d.id) { p.data = d; renderScreen(); } },
     artist_songs(d) { const p = top(); if (p && p.type === 'list' && p.kind === 'artistSongs' && p.id === d.id) { p.tracks = d.tracks || []; p.loading = false; renderScreen(); } },
@@ -166,6 +174,21 @@
     stats(d) { S.stats = d; renderScreen(); },
     status(d) { S.status = d; renderScreen(); },
     error(d) { toast(d.message || 'Algo salió mal'); },
+    favs(d) { S.favs = d.tracks || []; LS.set('m3.favs', S.favs); plKey = ''; if (S.playerOpen) renderPlayer(true); renderScreen(); },
+    bring_done(d) {
+      if (!d.ok) { S.bringFollow = false; toast(d.message || 'No pude llevarla a LAPAJA'); return; }
+      toast(d.n > 1 ? 'Listo: LAPAJA ahora escucha tus ' + d.n + ' canciones. Que Dios los ampare.' : 'Listo, va después de la que suena. Que LAPAJA sufra tus gustos.', 3200);
+      if (S.bringFollow) { S.bringFollow = false; S.followDiscordAt = Date.now(); tryFollowDiscord(); }
+    },
+    room_react(d) { showReact(d.room, d.who, d.kind); },
+    room_ask(d) { S.asks.push(d); if (navigator.vibrate) try { navigator.vibrate([20, 40, 20]); } catch (e) {} renderAskCard(); },
+    room_ask_done(d) {
+      const t = (d.track && d.track.title) || 'esa';
+      if (d.wait) toast('Calma, Romeo: espera unos segundos para pedir otra');
+      else if (d.gone) toast((d.by || 'Esa persona') + ' ya no está escuchando. Te dejaron en visto.');
+      else if (d.ok) toast((d.by || 'El DJ') + ' te hizo caso: «' + t + '» va después de esta', 3200);
+      else toast((d.by || 'El DJ') + ' dijo que ahora no. Duele, pero se supera.', 3000);
+    },
     solo_stream(d) { E.onStream(d); },
     solo_seg(d) { E.onSeg(d); },
     solo_plan_add(d) { E.onPlanAdd(d); },
@@ -307,6 +330,11 @@
       X.q.push.apply(X.q, items);
       if (!X.cur || (X.ended && !X.want)) playFrom(X.q.shift(), 0, false);
       else { X.sendPlan(); changed(); }
+    };
+    X.insertNext = function (m) {   // lo que te pidieron en tu sala: va justo después de la que suena
+      const t = mk(m);
+      if (!X.cur || (X.ended && !X.want)) { playFrom(t, 0, false); return; }
+      X.q.unshift(t); X.sendPlan(); changed();
     };
     X.playNext = function (m) {   // tocar una canción suelta: suena ya y lo demás sigue después
       const t = mk(m);
@@ -674,7 +702,7 @@
       '<span class="rc' + (t.video ? ' wide' : '') + '" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span class="rt ell">' + (playing ? '<span class="eq' + (np.paused ? ' off' : '') + '" style="margin-right:7px;color:var(--lil)"><i></i><i></i><i></i></span>' : '') + esc(t.title) + '</span>' +
       '<span class="ra ell">' + esc(opts.sub ? opts.sub(t) : (t.uploader || '')) + (t.duration ? ' · ' + fmt(t.duration) : '') + '</span></span></button>' +
       (opts.remove ? '<button class="rb" type="button" aria-label="Quitar" data-a="' + opts.remove + '" data-i="' + i + '">' + I.x + '</button>' : '') +
-      '<button class="rb" type="button" aria-label="Guardar en un disco" data-a="heartRow" data-i="' + i + '">' + I.heart + '</button>' +
+      '<button class="rb' + (isFav(t.webpage_url) ? ' fav' : '') + '" type="button" aria-label="Favorita" data-a="heartRow" data-lp="discRow" data-i="' + i + '">' + (isFav(t.webpage_url) ? I.heartF : I.heart) + '</button>' +
       '<button class="rb add" type="button" aria-label="Agregar a la lista" data-a="addRow" data-i="' + i + '">' + I.plus + '</button></div>';
   }
   function skelRows(n) { let h = '<div class="rows">'; for (let i = 0; i < n; i++) h += '<div class="row"><span class="rc skel"></span><span style="flex:1"><span class="skel" style="display:block;height:13px;width:60%"></span><span class="skel" style="display:block;height:11px;width:35%;margin-top:7px"></span></span></div>'; return h + '</div>'; }
@@ -723,6 +751,11 @@
     } else if (show('radios') && S.feed.loading) h += '<div class="sec">' + skelCards(4, true) + '</div>';
     if (show('playlists') && (feed.playlists || []).length) {
       h += '<div class="sec"><div class="sec-h"><h2 class="h2">Playlists que te van</h2></div><div class="hs">' + feed.playlists.map((p, i) => cardHtml(p, 'data-a="feedPl" data-i="' + i + '"', { sub: p.author || 'Playlist', noplay: true })).join('') + '</div></div>';
+    }
+    if (f === 'all' && S.favs.length) {
+      h += '<div class="sec"><button class="favcard" type="button" data-a="favs"><span class="fc-art">' + S.favs.slice(0, 4).map((t) => '<i style="' + bgi(t.art_url) + '"></i>').join('') + '</span>' +
+        '<span style="flex:1;min-width:0;text-align:left"><span class="fc-k">' + I.heartF.replace('<svg', '<svg width="13" height="13"') + ' TUS FAVORITAS</span><span class="fc-t">' + S.favs.length + (S.favs.length === 1 ? ' canción' : ' canciones') + ' que no sueltas</span><span class="fc-s ell">' + esc(S.favs.slice(0, 3).map((t) => t.title).join(' · ')) + '</span></span>' +
+        '<span class="hp" data-a="favPlay">' + I.play + '</span></button></div>';
     }
     if (f === 'all') {
       const rec = S.mode === 'solo' ? E.hist.slice(0, 12) : (S.g.recent || []).slice(0, 12);
@@ -826,6 +859,7 @@
   function scDiscos() {
     let h = '<div class="pg"><div class="top"><h1 class="h1">Discos</h1><button class="pill g" type="button" data-a="discNew">' + I.plus + 'Nuevo</button></div>' +
       '<p class="tip" style="margin-top:6px">Los discos son del grupo: cualquiera agrega canciones con el corazón.</p><div class="sec"><div class="dgrid">';
+    if (S.favs.length) h += '<button class="disc" type="button" data-a="favs" style="--dc:#FF9EC4"><span class="sleeve"><span class="vin"></span><span class="cover favcover">' + I.heartF.replace('<svg', '<svg width="54" height="54"') + '</span></span><span class="dn ell">Tus favoritas</span><span class="do">Solo tuyas · ' + S.favs.length + ' canciones</span></button>';
     h += S.albums.map((a, i) => {
       const c = a.cover ? S.covers[a.cover] : null;
       if (a.cover) askCover(a.cover);
@@ -857,7 +891,7 @@
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
-      '<p class="diag">3.0.4 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.1 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
@@ -886,7 +920,7 @@
       (p.kind === 'disc' ? '<button class="ib" type="button" data-a="discEdit" aria-label="Editar disco">' + I.pen + '</button>' : '') + '</div>';
     if (p.loading) return h + '<div style="height:16px"></div>' + skelRows(6) + '</div>';
     if (!tracks.length) return h + '<div class="sec"><p class="tip" style="text-align:center">' + (p.kind === 'disc' ? 'Este disco está vacío. Toca el corazón en cualquier canción para agregarla.' : 'No encontré canciones aquí.') + '</p></div></div>';
-    h += '<div class="sec"><div class="rows">' + tracks.map((t, i) => songRow(t, i, { num: p.kind === 'album', remove: p.kind === 'disc' ? 'discRemove' : null, sub: p.kind === 'disc' ? (x) => (x.uploader || '') + (x.added_by ? ' · ' + x.added_by : '') : null })).join('') + '</div></div>';
+    h += '<div class="sec"><div class="rows">' + tracks.map((t, i) => songRow(t, i, { num: p.kind === 'album', remove: p.kind === 'disc' ? 'discRemove' : p.kind === 'favs' ? 'favRemove' : null, sub: p.kind === 'disc' ? (x) => (x.uploader || '') + (x.added_by ? ' · ' + x.added_by : '') : null })).join('') + '</div></div>';
     if (p.kind === 'disc') h += '<div class="sec pad" style="display:flex;justify-content:center"><button class="pill r hold" type="button" data-hold="discDelete"><svg class="ring" viewBox="0 0 200 40" preserveAspectRatio="none"><rect x="1" y="1" width="198" height="38" rx="19" pathLength="100"/></svg>' + I.trash + '<span>Mantén para borrar el disco</span></button></div>';
     return h + '</div>';
   }
@@ -1022,12 +1056,15 @@
     plKey = k;
     const from = S.mode === 'solo' ? (E.follow ? 'Sala de ' + (E.follow === '@discord' ? 'LAPAJA' : E.follow) : 'Tu celular') : 'LAPAJA · Discord';
     $('pbody').innerHTML = '<div class="sgrab" data-drag="player" style="padding:2px 0 6px"><span class="grab"></span></div>' +
-      '<div class="pl-top"><button class="ib" type="button" data-a="closePlayer" aria-label="Bajar">' + I.down + '</button><div class="ctr"><div class="k">' + (S.mode === 'solo' ? 'SONANDO EN' : 'SONANDO EN') + '</div><div class="f ell">' + esc(from) + '</div></div>' +
+      '<div class="pl-top"><button class="ib" type="button" data-a="closePlayer" aria-label="Bajar">' + I.down + '</button>' +
+      (S.mode === 'solo' && !E.follow ? '<div class="ctr"><button class="pl-bring" type="button" data-a="bringOpen"><span class="bi">' + I.arrowR + '</span>Llevar a LAPAJA</button></div>'
+        : S.mode !== 'solo' ? '<div class="ctr"><button class="pl-bring" type="button" data-a="listenHere"><span class="bi">' + I.phones + '</span>Escuchar en mi cel</button></div>'
+          : '<div class="ctr"><div class="k">SONANDO EN</div><div class="f ell">' + esc(from) + '</div></div>') +
       '<button class="ib" type="button" data-a="openQueue" aria-label="Playlist">' + I.list + '</button></div>' +
       '<div class="pl-space"></div>' +
       (room ? '<div class="pl-roomrow"><button class="pl-room" type="button" data-a="openRoom">' + stackHtml(mem, 3).replace(/class="av"/g, 'class="av flo"') + '<span>' + (room === S.me ? 'Tu sala' : 'Sala de ' + esc(room === '@discord' ? 'LAPAJA' : room)) + '</span></button></div>' : '') +
       '<div class="pl-info"><div style="flex:1;min-width:0"><div class="t ell">' + esc(np.title) + '</div><div class="a ell">' + esc(np.uploader || '') + (S.mode !== 'solo' && np.who ? ' · la puso ' + esc(np.who) : '') + '</div></div>' +
-      '<button class="heart" type="button" data-a="heartNow" aria-label="Guardar en un disco">' + (liked(np) ? I.heartF : I.heart) + '</button></div>' +
+      '<button class="heart' + (liked(np) ? ' on' : '') + '" type="button" data-a="heartNow" data-lp="discNow" aria-label="' + (liked(np) ? 'Quitar de favoritas' : 'Agregar a favoritas') + '">' + (liked(np) ? I.heartF : I.heart) + '</button></div>' +
       '<div class="seek" id="seek"><div class="bar" id="sbar"><span class="fill" id="sfill"></span><span class="knob" id="sknob"></span></div><div class="tm"><span id="tnow">0:00</span><span id="tdur">' + fmt(np.duration) + '</span></div></div>' +
       '<div class="ctrls"><button class="cb sm' + (S.mode === 'solo' ? ' dim' : ' dim') + '" type="button" data-a="shuffle" aria-label="Mezclar la lista">' + I.shuf + '</button>' +
       '<button class="cb" type="button" data-a="prev" aria-label="Anterior"' + (v.canPrev || S.mode === 'solo' ? '' : ' disabled') + '>' + I.prev + '</button>' +
@@ -1038,7 +1075,25 @@
       '<button class="qbtn" type="button" data-a="openQueue">' + I.list + '<span>Lista' + (v.queue.length ? ' · ' + v.queue.length : '') + '</span></button></div>';
     tick();
   }
-  function liked() { return false; }
+  function isFav(url) { return !!url && S.favs.some((t) => t.webpage_url === url); }
+  function liked(np) { return !!np && isFav(np.webpage_url); }
+  const FAV_ON = ['Agregada a tus favoritas. Ya es oficial.', 'A favoritas. Esta ya no se te escapa.', 'Guardada. Se nota que te gusta, eh.', 'A favoritas. Relación seria.'];
+  const FAV_OFF = ['La sacaste de favoritas. Así de fácil se acaba el amor.', 'Fuera de favoritas. Ni las gracias.', 'Quitada. Bloqueada y sin rencor.'];
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  function toggleFav(m) {
+    if (!m || !m.webpage_url) return;
+    const on = !isFav(m.webpage_url);
+    const t = { title: m.title, uploader: m.uploader, duration: m.duration, art_url: m.art_url, webpage_url: m.webpage_url };
+    S.favs = on ? [t].concat(S.favs) : S.favs.filter((x) => x.webpage_url !== m.webpage_url);
+    LS.set('m3.favs', S.favs);
+    cmd('fav_set', { track: t, on: on });
+    buzz(on ? 18 : [10, 30, 10]);
+    toast(pick(on ? FAV_ON : FAV_OFF));
+    plKey = ''; if (S.playerOpen) renderPlayer(true);
+    renderScreen();
+  }
+  function buzz(p) { if (navigator.vibrate) try { navigator.vibrate(p); } catch (e) {} }
+  function openFavs() { push({ type: 'list', kind: 'favs', title: 'Tus favoritas', sub: 'Solo tuyas', k: 'FAVORITAS', tracks: S.favs.slice() }); }
   // la portada de fondo: al cambiar de canción, la nueva aparece suave encima
   function setWall(url) {
     const w = $('pwall'), b = $('pbg2');
@@ -1259,7 +1314,7 @@
     S.roomKey = k;
     const dc = id === '@discord';
     const P = [[14, 66], [86, 66], [24, 86], [76, 86], [6, 78], [94, 78], [40, 95], [60, 95]];
-    const people = mem.slice(0, 8).map((m, i) => '<span class="who' + (m.host ? ' host' : '') + (m.me ? ' me' : '') + '" style="left:' + P[i][0] + '%;top:' + (P[i][1] * 3.8 - 40) + 'px;animation-delay:' + (i * 0.2) + 's">' +
+    const people = mem.slice(0, 8).map((m, i) => '<span data-n="' + esc(m.name) + '" class="who' + (m.host ? ' host' : '') + (m.me ? ' me' : '') + '" style="left:' + P[i][0] + '%;top:' + (P[i][1] * 3.8 - 40) + 'px;animation-delay:' + (i * 0.2) + 's">' +
       '<span class="hd" style="background:' + pcolor(m.name) + '">' + esc(initial(m.name)) + '</span><span class="bd" style="background:' + pcolor(m.name) + '"></span><span class="sh2"></span><span class="nm">' + esc(m.me ? 'Tú' : m.name) + '</span></span>').join('');
     const h = '<div class="sgrab" data-drag="sheet"><span class="grab"></span></div><div class="sh"><span style="min-width:0"><h2 class="h2" style="font-size:22px">' + (dc ? 'Sala de LAPAJA' : id === S.me ? 'Tu sala' : 'Sala de ' + esc(id)) + '</h2>' +
       '<span class="kicker">' + mem.length + (dc ? ' en la llamada' : ' escuchando') + (dc ? '' : ' · ' + esc(id === S.me ? 'tú pones' : id + ' pone') + ' la música') + '</span></span></div>' +
@@ -1274,10 +1329,117 @@
       '<g transform="translate(118 36) scale(1 .5)"><circle r="22" fill="#15111F"/><g class="tt"><circle r="22" fill="none" stroke="#3B3166" stroke-width="2"/><circle r="6" fill="#A8E6F5"/><rect x="-1.5" y="-21" width="3" height="10" fill="#C9B4F8"/></g></g></svg>' +
       people + '</div>' +
       '<div class="nowc" style="margin-top:8px"><span class="rc" style="' + bgi(host.track.art_url) + '"></span><span style="flex:1;min-width:0"><span class="k">' + (host.paused ? 'EN PAUSA' : 'SONANDO') + '</span><span class="ell" style="font-size:15px;font-weight:800">' + esc(host.track.title || '') + '</span><span class="ell" style="font-size:12px;font-weight:600;color:var(--mut)">' + esc(host.track.uploader || '') + '</span></span></div>' +
-      '<div class="pad" style="margin-top:12px">' + (inIt ? '<button class="pill r" type="button" data-a="leaveRoom" style="width:100%;height:50px;font-size:15px">Salir de la sala</button><p class="tip" style="text-align:center;margin-top:8px">Vuelves a tu música donde la dejaste</p>'
+      ((inIt || id === S.me) ? '<div class="reacts" role="group" aria-label="Reaccionar">' + REACTS.map((r) => '<button type="button" data-a="react" data-room="' + esc(id) + '" data-k="' + r[0] + '" aria-label="' + r[1] + '">' + r[2] + '</button>').join('') + '</div>' : '') +
+      (inIt ? '<div class="pad" style="margin-top:10px"><button class="pill g" type="button" data-a="askOpen" data-room="' + esc(id) + '" style="width:100%;height:46px;font-size:14px">' + I.search.replace('<svg', '<svg width="16" height="16"') + (dc ? 'Poner una en LAPAJA' : 'Pedirle una canción a ' + esc(id)) + '</button></div>' : '') +
+      '<div class="pad" style="margin-top:10px">' + (inIt ? '<button class="pill r" type="button" data-a="leaveRoom" style="width:100%;height:50px;font-size:15px">Salir de la sala</button><p class="tip" style="text-align:center;margin-top:8px">Vuelves a tu música donde la dejaste</p>'
         : id === S.me ? '<p class="tip" style="text-align:center">Los demás están escuchando lo mismo que tú.</p>'
           : '<button class="pill p" type="button" data-a="room" data-id="' + esc(id) + '" style="width:100%;height:50px;font-size:15px">Entrar a la sala</button>') + '</div></div>';
     $('sheet').innerHTML = h;
+  }
+  const REACTS = [['heart', 'Me encanta', '<svg viewBox="0 0 24 24" fill="#FF9EC4"><path d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"/></svg>'],
+    ['fire', 'Fuego', '<svg viewBox="0 0 24 24" fill="#F2A33A"><path d="M12 2c1 4 5 5.5 5 10.5A5 5 0 0 1 7 12.5c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg>'],
+    ['star', 'Estrella', '<svg viewBox="0 0 24 24" fill="#A8E6F5"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>'],
+    ['jaja', 'Jaja', '<b>JAJA</b>'],
+    ['note', 'A bailar', '<svg viewBox="0 0 24 24" fill="#C9B4F8"><path d="M9 17.5a3 3 0 1 1-2-2.8V4l12-2v12.5a3 3 0 1 1-2-2.8V6.4L9 7.8z"/></svg>']];
+  // una reacción que sale flotando (sobre la carita de quien la mandó, en la sala o en el reproductor)
+  function showReact(room, who, kind) {
+    const r = REACTS.find((x) => x[0] === kind);
+    if (!r) return;
+    const spots = [];
+    if (S.sheet === 'room' && S.roomId === room) {
+      const box = document.querySelector('#sheet .room');
+      if (box) {
+        const av = Array.from(box.querySelectorAll('.who')).find((x) => x.dataset.n === who);
+        const br = box.getBoundingClientRect();
+        if (av) { const ar = av.getBoundingClientRect(); spots.push([box, ar.left - br.left + ar.width / 2, ar.top - br.top]); }
+        else spots.push([box, br.width * (0.3 + Math.random() * 0.4), br.height * 0.5]);
+      }
+    }
+    if (S.playerOpen && myRoom() === room) {
+      const pill = document.querySelector('#player .pl-room');
+      if (pill) spots.push([pill, 20 + Math.random() * 40, 0]);
+    }
+    spots.forEach(([box, x, y]) => {
+      const el = document.createElement('span');
+      el.className = 'rfly'; el.innerHTML = r[2];
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      el.style.setProperty('--dx', (Math.random() * 40 - 20) + 'px');
+      box.appendChild(el);
+      setTimeout(() => el.remove(), 2600);
+    });
+  }
+  // pedir una canción en una sala (o poner una en LAPAJA)
+  let askT = null;
+  function openAsk(room) {
+    S.askRoom = room; S.askQ = ''; S.askRes = null;
+    openSheet('ask');
+    $('sheet').innerHTML = '<div class="sgrab" data-drag="sheet"><span class="grab"></span></div><div class="sh"><span style="min-width:0"><h2 class="h2">' + (room === '@discord' ? 'Poner una en LAPAJA' : 'Pedirle una a ' + esc(room)) + '</h2><span class="kicker">' + (room === '@discord' ? 'Va al final de la lista del grupo' : 'Le llega a ' + esc(room) + ' y decide. Sin presión… o sí.') + '</span></span></div>' +
+      '<label class="sbox" style="margin-top:4px">' + I.search + '<span class="hide">Buscar</span><input id="askIn" type="search" enterkeyhint="search" autocomplete="off" placeholder="¿Qué canción?"></label><div class="sbody" id="askBody" style="margin-top:8px"></div>';
+    renderAsk();
+    setTimeout(() => { const i = $('askIn'); if (i) i.focus(); }, 350);
+  }
+  function renderAsk() {
+    const b = $('askBody');
+    if (!b || S.sheet !== 'ask') return;
+    if (!S.askQ) { b.innerHTML = '<p class="tip" style="padding:0 18px">Escribe el nombre y elige.</p>'; return; }
+    if (!S.askRes) { b.innerHTML = skelRows(4); return; }
+    if (!S.askRes.length) { b.innerHTML = '<p class="tip" style="padding:0 18px">No encontré esa. ¿Seguro que existe?</p>'; return; }
+    b.innerHTML = '<div class="rows">' + S.askRes.slice(0, 12).map((t, i) => '<button class="row" type="button" data-a="askPick" data-i="' + i + '"><span class="rc' + (t.video ? ' wide' : '') + '" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0;text-align:left"><span class="rt ell">' + esc(t.title) + '</span><span class="ra ell">' + esc(t.uploader || '') + (t.duration ? ' · ' + fmt(t.duration) : '') + '</span></span><span class="rb add">' + I.arrowR + '</span></button>').join('') + '</div>';
+  }
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'askIn') return;
+    S.askQ = e.target.value.trim(); S.askRes = null; renderAsk();
+    clearTimeout(askT);
+    if (S.askQ) askT = setTimeout(() => cmd('cat_search', { query: S.askQ, kind: 'songs', tag: 'ask' }), 450);
+  });
+  // a mí (dueño de la sala) me piden una canción
+  let askCardT = null;
+  function renderAskCard() {
+    let c = $('askcard');
+    const a = S.asks[0];
+    if (!a) { if (c) c.classList.remove('on'); return; }
+    if (!c) { c = document.createElement('div'); c.id = 'askcard'; c.className = 'askcard'; document.body.appendChild(c); }
+    const t = a.track || {};
+    c.innerHTML = '<div class="ak"><span class="av" style="width:22px;height:22px;font-size:10.5px;border:0;background:' + pcolor(a.from) + '">' + esc(initial(a.from)) + '</span>' + esc(String(a.from).toUpperCase()) + ' TE PIDE UNA CANCIÓN' + (S.asks.length > 1 ? ' · +' + (S.asks.length - 1) : '') + '</div>' +
+      '<div class="am"><span class="rc" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span class="ell" style="font-size:15px;font-weight:800">' + esc(t.title || '') + '</span><span class="ell" style="font-size:12px;font-weight:600;color:var(--mut)">' + esc(t.uploader || '') + (a.note ? ' · «' + esc(a.note) + '»' : '') + '</span></span></div>' +
+      '<div class="aa"><button class="pill w" type="button" data-a="askYes">Va después de esta</button><button class="pill g" type="button" data-a="askNo">Ahora no</button></div>';
+    void c.offsetWidth; c.classList.add('on');
+    clearTimeout(askCardT);
+    askCardT = setTimeout(() => { S.asks.shift(); renderAskCard(); }, 60000);
+  }
+  function answerAsk(ok) {
+    const a = S.asks.shift();
+    if (!a) return;
+    if (ok) {
+      if (S.mode === 'solo') E.insertNext(a.track); else cmd('bring', { tracks: [a.track], front: true });
+      toast('Le hiciste caso a ' + a.from + '. Qué buena gente.');
+    } else toast('Rechazada con estilo.');
+    cmd('room_ask_reply', { to: a.from, ok: ok, track: a.track });
+    renderAskCard();
+  }
+  // llevar lo que suena en mi cel a LAPAJA
+  function openBring() {
+    if (!E.cur) return;
+    openSheet('bring');
+    const vm = S.g.voice_members || [], gnp = S.g.now_playing;
+    const c = E.cur, n = E.q.length;
+    $('sheet').innerHTML = '<div class="sgrab" data-drag="sheet"><span class="grab"></span></div>' +
+      '<div class="sh"><span style="display:flex;align-items:center;gap:14px;min-width:0"><span class="lpbadge">LP' + (gnp ? '<i></i>' : '') + '</span><span style="min-width:0"><h2 class="h2" style="font-size:22px">Llevar a LAPAJA</h2><span class="kicker">Que suene para todos en el Discord</span></span></span></div>' +
+      '<div class="sbody">' +
+      '<div class="bringwho">' + stackHtml(vm.map((x) => ({ name: x })), 4) + '<span>' + (vm.length ? esc(vm.slice(0, 3).join(', ')) + (vm.length > 3 ? ' y ' + (vm.length - 3) + ' más' : '') + (vm.length === 1 ? ' está' : ' están') + ' en la llamada' : 'No hay nadie en la llamada. Vas a cantar solo.') + (gnp ? ' · ahora suena «' + esc(gnp.title) + '»' : '') + '</span></div>' +
+      '<button class="bopt on" type="button" data-a="bring" data-k="one"><span class="rc" style="' + bgi(c.art_url) + '"></span><span style="flex:1;min-width:0"><b>Ponerla después de la actual</b><small class="ell">Solo «' + esc(c.title) + '»</small></span></button>' +
+      (n ? '<button class="bopt" type="button" data-a="bring" data-k="all"><span class="rc ico">' + I.list + '</span><span style="flex:1;min-width:0"><b>Llevar también mi lista</b><small>Esta y las ' + n + ' que siguen</small></span></button>' : '') +
+      '<label class="opt" style="padding:12px 18px 4px"><span style="flex:1"><b>Pausar mi cel y entrar a la sala de LAPAJA</b><small>Así escuchas lo mismo que ellos, sincronizado</small></span><input type="checkbox" id="bringFollow" checked></label></div>';
+  }
+  function tryFollowDiscord() {
+    if (!S.followDiscordAt) return;
+    if (Date.now() - S.followDiscordAt > 30000) { S.followDiscordAt = 0; return; }
+    const np = S.g.now_playing;
+    if (!np || !np.webpage_url) return;
+    S.followDiscordAt = 0;
+    if (S.mode !== 'solo') enterMode('solo');
+    if (E.follow !== '@discord') E.followTo('@discord');
+    toast('Ya estás en la sala de LAPAJA. Compórtate.');
   }
   // elegir disco para guardar una canción
   function openPicker(m, refresh) {
@@ -1428,8 +1590,39 @@
     },
     tuPlay: (t) => { const m = (S.tuRows || [])[+t.dataset.i]; if (m) playOne(m); },
     addRow: (t) => { const m = ROWS[+t.dataset.i]; if (m) { addOne(m); t.classList.add('ok'); t.innerHTML = I.check; } },
-    heartRow: (t) => { const m = ROWS[+t.dataset.i]; if (m) openPicker(m); },
-    heartNow: () => { const np = PV().np; if (np) openPicker({ title: np.title, uploader: np.uploader, art_url: np.art_url, webpage_url: np.webpage_url, duration: np.duration }); },
+    heartRow: (t) => { const m = ROWS[+t.dataset.i]; if (m) toggleFav(m); },
+    heartNow: () => { const np = PV().np; if (np) toggleFav(np); },
+    discRow: (t) => { const m = ROWS[+t.dataset.i]; if (m) openPicker(m); },
+    discNow: () => { const np = PV().np; if (np) openPicker({ title: np.title, uploader: np.uploader, art_url: np.art_url, webpage_url: np.webpage_url, duration: np.duration }); },
+    favs: (t, e) => { if (e && e.target.closest('[data-a="favPlay"]')) return A.favPlay(); openFavs(); },
+    favPlay: () => { if (S.favs.length) { playTracks(S.favs, 0, true); toast('Tus favoritas en aleatorio. Puro hit, cero relleno.'); } },
+    favRemove: (t) => { const p = top(); const tr = p && p.tracks[+t.dataset.i]; if (tr) { toggleFav(tr); p.tracks = S.favs.slice(); renderScreen(true); } },
+    // llevar a LAPAJA / escuchar en mi cel
+    bringOpen: () => openBring(),
+    bring: (t) => {
+      const all = t.dataset.k === 'all';
+      const items = (all ? [E.cur].concat(E.q) : [E.cur]).filter(Boolean).map((x) => E.meta(x));
+      if (!items.length) return;
+      const f = $('bringFollow');
+      S.bringFollow = !f || f.checked;
+      cmd('bring', { tracks: items, front: true });
+      closeSheet();
+      toast('Llevándola a LAPAJA…');
+    },
+    listenHere: () => { enterMode('solo'); S.followDiscordAt = Date.now(); tryFollowDiscord(); },
+    // salas
+    react: (t) => { const room = t.dataset.room; if (!room) return; cmd('room_react', { room: room, kind: t.dataset.k }); showReact(room, S.me, t.dataset.k); buzz(8); },
+    askOpen: (t) => openAsk(t.dataset.room),
+    askPick: (t) => {
+      const m = (S.askRes || [])[+t.dataset.i]; const room = S.askRoom;
+      if (!m || !room) return;
+      const tr = { title: m.title, uploader: m.uploader, duration: m.duration, art_url: m.art_url, webpage_url: m.webpage_url };
+      if (room === '@discord') { cmd('bring', { tracks: [tr], front: false }); toast('A la lista de LAPAJA. Ya es problema de todos.'); }
+      else { cmd('room_ask', { room: room, track: tr }); toast('Le pediste «' + m.title + '» a ' + room + '. Ahora a rezar.', 2800); }
+      closeSheet();
+    },
+    askYes: () => answerAsk(true),
+    askNo: () => answerAsk(false),
     pick: (t) => { const a = S.albums[+t.dataset.i]; if (a && S.pickMeta) { cmd('album_add', { id: a.id, tracks: [S.pickMeta] }); toast('Guardada en «' + a.name + '»'); closeSheet(); } },
     pickNew: () => { const m = S.pickMeta; askText('Nombre del disco nuevo', '', (name) => { if (!name) return; S.pendingAdd = { name: name, meta: m }; cmd('album_create', { name: name }); }); },
     // artista
@@ -1560,6 +1753,101 @@
     };
     document.addEventListener('touchend', end);
     document.addEventListener('touchcancel', end);
+  })();
+
+  /* ======================= mantener presionado (corazón -> elegir disco) ======================= */
+  const LP = { t: null, el: null, fired: null, at: 0, x: 0, y: 0 };
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-lp]');
+    if (!el) return;
+    LP.el = el; LP.x = e.clientX; LP.y = e.clientY;
+    clearTimeout(LP.t);
+    LP.t = setTimeout(() => { LP.fired = el; LP.at = Date.now(); buzz(25); const f = A[el.dataset.lp]; if (f) f(el); }, 550);
+  });
+  const lpCancel = () => { clearTimeout(LP.t); LP.el = null; };
+  document.addEventListener('pointerup', lpCancel);
+  document.addEventListener('pointercancel', lpCancel);
+  document.addEventListener('pointermove', (e) => { if (LP.el && Math.hypot(e.clientX - LP.x, e.clientY - LP.y) > 10) lpCancel(); });
+  // el toque que sigue a un "mantener" no cuenta como toque
+  document.addEventListener('click', (e) => {
+    if (LP.fired && Date.now() - LP.at < 900 && e.target.closest('[data-lp]') === LP.fired) { e.stopPropagation(); e.preventDefault(); }
+    LP.fired = null;
+  }, true);
+
+  /* ======================= gestos: deslizar canciones y el mini ======================= */
+  (function () {
+    let g = null, swallow = 0;
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1 || DRAG.on) return;
+      const t = e.touches[0];
+      const mini = e.target.closest('#mini');
+      const row = !mini && e.target.closest('#screen .row');
+      if (!mini && !(row && row.querySelector('.rb.add'))) return;
+      if (t.clientX < 28 && (S.stack.length || S.playerOpen)) return;   // eso es "volver"
+      g = { el: mini || row, mini: !!mini, x0: t.clientX, y0: t.clientY, dx: 0, on: false };
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!g) return;
+      const t = e.touches[0], dx = t.clientX - g.x0, dy = t.clientY - g.y0;
+      if (!g.on) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }
+        if (Math.abs(dx) < 12) return;
+        g.on = true;
+        g.el.classList.add('swiping');
+        if (!g.mini) {
+          g.bg = document.createElement('span');
+          g.bg.className = 'swbg';
+          const par = g.el.parentNode;
+          if (getComputedStyle(par).position === 'static') par.style.position = 'relative';
+          g.bg.style.top = g.el.offsetTop + 'px'; g.bg.style.height = g.el.offsetHeight + 'px';
+          g.bg.style.left = g.el.offsetLeft + 'px'; g.bg.style.width = g.el.offsetWidth + 'px';
+          par.insertBefore(g.bg, g.el);
+        }
+      }
+      g.dx = g.mini ? dx : Math.max(-140, Math.min(140, dx));
+      const inner = g.mini ? g.el : g.el;
+      inner.style.transform = 'translateX(' + g.dx + 'px)';
+      if (g.bg) {
+        const right = g.dx > 0;
+        g.bg.className = 'swbg ' + (right ? 'r' : 'l') + (Math.abs(g.dx) > 90 ? ' go' : '');
+        g.bg.innerHTML = right ? I.plus + '<span>A tu lista</span>' : '<span>Favorita</span>' + I.heartF;
+      }
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    const end = () => {
+      if (!g) return;
+      const w = g; g = null;
+      if (!w.on) return;
+      swallow = Date.now();
+      const done = Math.abs(w.dx) > (w.mini ? 70 : 90);
+      w.el.classList.remove('swiping');
+      if (w.mini) {
+        if (done) {
+          w.el.style.transition = 'transform .22s var(--out), opacity .22s';
+          w.el.style.transform = 'translateX(' + (w.dx > 0 ? innerWidth : -innerWidth) + 'px)';
+          w.el.style.opacity = '0';
+          buzz(12);
+          act(w.dx < 0 ? 'skip' : 'prev');
+          setTimeout(() => { w.el.style.transition = 'none'; w.el.style.transform = 'translateX(' + (w.dx > 0 ? -60 : 60) + 'px)'; void w.el.offsetWidth; w.el.style.transition = ''; w.el.style.transform = ''; w.el.style.opacity = ''; }, 230);
+        } else w.el.style.transform = '';
+        return;
+      }
+      w.el.style.transform = '';
+      w.el.classList.add('swhold');
+      setTimeout(() => w.el.classList.remove('swhold'), 320);
+      if (w.bg) setTimeout(() => w.bg.remove(), 300);
+      if (!done) return;
+      const b = w.el.querySelector('[data-i]');
+      const m = b && ROWS[+b.dataset.i];
+      if (!m) return;
+      buzz(15);
+      if (w.dx > 0) { addOne(m); const a = w.el.querySelector('.rb.add'); if (a) { a.classList.add('ok'); a.innerHTML = I.check; } }
+      else toggleFav(m);
+    };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+    // que soltar después de deslizar no abra nada
+    document.addEventListener('click', (e) => { if (Date.now() - swallow < 350 && e.target.closest('#mini, #screen .row')) { e.stopPropagation(); e.preventDefault(); } }, true);
   })();
 
   /* ======================= avisitos ======================= */

@@ -171,6 +171,38 @@ class CumitoServer:
         except ValueError as e:   # p. ej. una imagen que no se pudo leer
             await self._reply(ws, "error", message=str(e)[:160], action=action)
 
+    async def _room_command(self, action, data, who, ws):
+        """Salas del modo solo: reacciones que ven todos, y pedirle una canción al dueño."""
+        import json as _json
+        rl = self._room_rl = getattr(self, "_room_rl", {})
+        now = time.time()
+        room = str(data.get("room") or "")[:40]
+        if action == "room_react":
+            kind = str(data.get("kind") or "")[:12]
+            if not room or kind not in ("heart", "fire", "star", "jaja", "note") or now - rl.get(("r", who), 0) < 0.5:
+                return
+            rl[("r", who)] = now
+            await self.relay.send_cap("m3", _json.dumps({"type": "room_react", "room": room, "who": who, "kind": kind}))
+        elif action == "room_ask":
+            t = data.get("track") or {}
+            if not room or room == who or not str(t.get("webpage_url") or "").startswith("http"):
+                return
+            if now - rl.get(("a", who), 0) < 8:
+                await self._reply(ws, "room_ask_done", ok=False, wait=True, track=t, by=room)
+                return
+            rl[("a", who)] = now
+            self._ask_n = getattr(self, "_ask_n", 0) + 1
+            track = {k: t.get(k) for k in ("title", "uploader", "webpage_url", "duration", "art_url")}
+            msg = {"type": "room_ask", "id": self._ask_n, "from": who, "track": track,
+                   "note": str(data.get("note") or "")[:80]}
+            n = await self.relay.send_cap("m3", _json.dumps(msg), names={room})
+            if not n:
+                await self._reply(ws, "room_ask_done", ok=False, gone=True, track=track, by=room)
+        elif action == "room_ask_reply":
+            to = str(data.get("to") or "")[:32]
+            msg = {"type": "room_ask_done", "ok": bool(data.get("ok")), "track": data.get("track") or {}, "by": who}
+            await self.relay.send_cap("m3", _json.dumps(msg), names={to})
+
     async def _catalog_command(self, action, data, ws):
         """App 3.0: buscar artistas/álbumes/playlists, perfiles e inicio."""
         from cumito_bot import catalog
@@ -183,7 +215,7 @@ class CumitoServer:
                 res = cache.get(key)
                 if not res or time.time() - res[0] > 900:
                     res = cache[key] = (time.time(), await LANES.light(catalog.search_sync, q, kind, 20, timeout=25))
-                await self._reply(ws, "cat_results", query=q, kind=kind, **res[1])
+                await self._reply(ws, "cat_results", query=q, kind=kind, tag=data.get("tag"), **res[1])
             elif action == "artist":
                 aid = str(data.get("id") or "")
                 key = ("a", aid)
@@ -261,6 +293,16 @@ class CumitoServer:
                                                   {k: str(v)[:80] for k, v in data.items() if k not in ("type", "action")})
         elif action == "solo_status":
             await self.solo.status(who, data)
+        elif action in ("fav_list", "fav_set"):
+            db = bot.db
+            if action == "fav_set":
+                await db.run(db.fav_set, who, data.get("track") or {}, bool(data.get("on")))
+            await self._reply(ws, "favs", tracks=await db.run(db.favs, who))
+        elif action == "bring":
+            err = await bot.bring_tracks(data.get("tracks") or [], front=bool(data.get("front")), who=who)
+            await self._reply(ws, "bring_done", ok=not err, message=err, n=len(data.get("tracks") or []))
+        elif action in ("room_react", "room_ask", "room_ask_reply"):
+            await self._room_command(action, data, who, ws)
         elif action == "playlist_preview":
             # responde solo a quien preguntó, como la búsqueda
             preview = await bot.action_playlist_preview(data.get("url", ""))

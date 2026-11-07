@@ -19,6 +19,7 @@ class RelayServer:
         self.port = port
         self.on_command = on_command  # async def on_command(dict, display_name, websocket)
         self._clients = {}  # websocket -> nombre mostrado
+        self._caps = {}     # websocket -> lo que entiende esa app (la del celular 3.0 manda "m3")
         self._server = None
         self._last_state = {
             "type": "state", "host_label": "", "now_playing": None,
@@ -54,6 +55,8 @@ class RelayServer:
                 if data.get("type") == "hello":
                     name = str(data.get("name") or "Invitado")[:32]
                     self._clients[ws] = name
+                    caps = data.get("caps")
+                    self._caps[ws] = {str(c)[:16] for c in caps[:10]} if isinstance(caps, list) else set()
                 elif data.get("type") == "command":
                     try:
                         await self.on_command(data, self._clients.get(ws, "Invitado"), ws)
@@ -63,6 +66,23 @@ class RelayServer:
             pass
         finally:
             self._clients.pop(ws, None)
+            self._caps.pop(ws, None)
+
+    async def send_cap(self, cap, raw, names=None):
+        """Un mensaje solo para las apps que lo entienden (cap), y si se dan
+        nombres, solo para esas personas (en todos sus celulares)."""
+        n = 0
+        for ws, name in list(self._clients.items()):
+            if cap not in self._caps.get(ws, ()):
+                continue
+            if names is not None and name not in names:
+                continue
+            try:
+                await ws.send(raw)
+                n += 1
+            except Exception:
+                pass
+        return n
 
     async def broadcast_state(self, host_label, now_playing, queue, members=None, volume=None, recent=None,
                               **extra):

@@ -8,6 +8,7 @@ Guarda:
   - album_tracks: las canciones de cada Disco
   - lyrics:       letras ya buscadas (para no volver a pedirlas)
   - kv:           memoria chica para lo demás (p. ej. enlaces de Spotify)
+  - favs:         las favoritas de cada uno (el corazón de la app del celular)
 
 Todo se hace en UN hilo aparte: el loop principal (el que atiende a las
 apps y al bot) nunca se queda esperando al disco.
@@ -49,6 +50,9 @@ CREATE TABLE IF NOT EXISTS album_tracks(
 CREATE INDEX IF NOT EXISTS album_tracks_album ON album_tracks(album_id, pos);
 CREATE TABLE IF NOT EXISTS lyrics(key TEXT PRIMARY KEY, data TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS favs(
+    who TEXT NOT NULL, url TEXT NOT NULL, title TEXT, uploader TEXT, duration INTEGER, art TEXT, ts REAL,
+    PRIMARY KEY(who, url));
 """
 
 PERIODS = {"week": 7 * 86400, "month": 30 * 86400, "year": 365 * 86400, "all": None}
@@ -354,6 +358,31 @@ class Store:
         ids = [x[0] for x in con.execute("SELECT id FROM album_tracks WHERE album_id=? ORDER BY pos", (album_id,))]
         con.executemany("UPDATE album_tracks SET pos=? WHERE id=?", [(i, t) for i, t in enumerate(ids)])
         con.commit()
+
+    # ---------- favoritas de cada uno ----------
+    FAVS_MAX = 2000
+
+    def favs(self, who: str) -> list[dict]:
+        rows = self._db().execute("SELECT * FROM favs WHERE who=? ORDER BY ts DESC", (who,)).fetchall()
+        return [{"title": r["title"], "webpage_url": r["url"], "uploader": r["uploader"],
+                 "duration": r["duration"], "art_url": r["art"], "ts": r["ts"]} for r in rows]
+
+    def fav_set(self, who: str, track: dict, on: bool) -> bool:
+        url = str((track or {}).get("webpage_url") or "")
+        if not who or not url.startswith("http"):
+            return False
+        con = self._db()
+        if on:
+            n = con.execute("SELECT COUNT(*) FROM favs WHERE who=?", (who,)).fetchone()[0]
+            if n >= self.FAVS_MAX:
+                return False
+            con.execute("INSERT OR REPLACE INTO favs(who, url, title, uploader, duration, art, ts) VALUES(?,?,?,?,?,?,?)",
+                        (who, url, (track.get("title") or "Sin título")[:200], track.get("uploader"),
+                         track.get("duration"), track.get("art_url"), time.time()))
+        else:
+            con.execute("DELETE FROM favs WHERE who=? AND url=?", (who, url))
+        con.commit()
+        return True
 
     # ---------- letras y memoria chica ----------
     def lyrics_get(self, key: str, max_age: float | None = None) -> dict | None:

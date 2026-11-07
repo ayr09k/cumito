@@ -1308,6 +1308,38 @@ class BotCore:
             self._prefetch_next()
         return None
 
+    async def bring_tracks(self, tracks, front=False, who=None):
+        """Del modo solo a LAPAJA: canciones que alguien trae de su celular.
+        front: van justo después de la que suena (en orden)."""
+        clean = []
+        for t in (tracks or [])[:60]:
+            url = str((t or {}).get("webpage_url") or "")
+            if not url.startswith("http"):
+                continue
+            clean.append({"title": t.get("title") or "Sin título", "webpage_url": url, "duration": t.get("duration"),
+                          "uploader": t.get("uploader"), "art_url": t.get("art_url"), "who": who})
+        if not clean:
+            return "No hay nada que llevar."
+        vc = await self._voice_client(connect=True)
+        if vc is None:
+            return "Cumito no está en la llamada: alguien tiene que entrar a un canal de voz primero."
+        if front:
+            for t in reversed(clean):
+                self._new_uid(t)
+                t["prepared"] = False
+                self.queue.appendleft(t)
+        else:
+            self._enqueue(clean)
+        what = f"«{clean[0]['title']}»" if len(clean) == 1 else f"{len(clean)} canciones"
+        self.log_activity(who, "add", f"trajo {what} desde su celular", title=clean[0]["title"],
+                          sub=clean[0].get("uploader"), art=clean[0].get("art_url"))
+        if not vc.is_playing() and not vc.is_paused():
+            await self._play_next()
+        else:
+            self._prefetch_next()
+            self._notify()
+        return None
+
     def track_for_album(self, which: str = "current", uid=None) -> dict | None:
         """La canción que se quiere guardar en un disco: la que suena o una de la lista."""
         t = None
