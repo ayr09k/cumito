@@ -407,3 +407,10 @@ a.opt.quiet{opacity:.7}
 .row .rc.wide{width:84px;height:47px;border-radius:10px}
 .row.vid .rt{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.25}
 .row.vid .rb:not(.add){display:none}
+
+/* ---- 3.0.4: menos margen abajo ----
+   El margen de la rayita del iPhone (34 px) era demasiado; se usa una parte.
+   Y si iOS ya deja la app más bajita que la pantalla (el hueco negro), casi nada. */
+:root{--sb:max(calc(env(safe-area-inset-bottom,0px) - 12px),0px)}
+:root.vgap{--sb:4px}
+.player{padding-bottom:calc(10px + var(--sb))}

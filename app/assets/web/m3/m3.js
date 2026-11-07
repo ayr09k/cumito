@@ -55,6 +55,7 @@
     const focused = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
     if (!focused) SCR.gap = gap > 4 && gap < 140 ? gap : 0;
     root.style.setProperty('--gap', SCR.gap + 'px');
+    root.classList.toggle('vgap', SCR.gap > 20 && SCR.gap < 140);
     // el ajuste se activa solo cuando confirmemos los números en un iPhone de verdad
     root.classList.toggle('gapfix', SCR.gap > 0 && LS.get('gapfix', false));
   }
@@ -855,7 +856,7 @@
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
-      '<p class="diag">3.0.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.0.4 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
