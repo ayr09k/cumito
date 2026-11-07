@@ -19,12 +19,43 @@
     set(k, v) { try { localStorage.setItem('cumito.' + k, JSON.stringify(v)); } catch (e) {} },
   };
   const bgi = (u) => (u ? "background-image:url('" + String(u).replace(/'/g, '%27') + "')" : '');
+  // portadas en grande para los fondos (las listas usan las chiquitas, que cargan rápido).
+  // YouTube Music deja pedir el tamaño; en YouTube se pide la máxima y, si no existe, queda la normal debajo.
+  const q = (u) => "url('" + String(u).replace(/'/g, '%27') + "')";
+  function hiUrl(u, yt) {
+    if (!u) return null;
+    u = String(u);
+    if (/googleusercontent\.com|ggpht\.com/.test(u) && /=w\d+-h\d+/.test(u)) return u.replace(/=w\d+-h\d+/, '=w1200-h1200');
+    const m = yt && u.match(/^(https:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/[\w-]+\/)(?:hq|mq|sd)default\.(jpg|webp)/);
+    return m ? m[1] + 'maxresdefault.' + m[2] : null;
+  }
+  const bgHi = (u) => { const h = hiUrl(u, false); return u ? 'background-image:' + (h ? q(h) + ',' : '') + q(u) : ''; };
   const PAL = ['#E8618C', '#3A9BDC', '#F2A33A', '#4FBF7A', '#B07CF2', '#E0563B', '#2EC4B6', '#D9A21B'];
   const pcolor = (n) => { let h = 0; for (const c of String(n || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PAL[h % PAL.length]; };
   const initial = (n) => (String(n || '?').trim()[0] || '?').toUpperCase();
   const isUrl = (q) => /^https?:\/\//i.test(q) || /^(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com|open\.spotify\.com|soundcloud\.com)\//i.test(q);
   const isList = (q) => /[?&]list=|\/playlist|spotify\.com\/(playlist|album)\//i.test(q);
   if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) document.documentElement.classList.add('touch');
+  const STANDALONE = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  const SCR = { gap: 0, sb: 0 };
+  function measure() {
+    const root = document.documentElement;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;visibility:hidden;padding-bottom:env(safe-area-inset-bottom,0px)';
+    document.body.appendChild(probe);
+    SCR.sb = parseFloat(getComputedStyle(probe).paddingBottom) || 0;
+    probe.remove();
+    const portrait = innerHeight > innerWidth;
+    const full = portrait ? Math.max(screen.height, screen.width) : Math.min(screen.height, screen.width);
+    const gap = STANDALONE ? Math.round(full - innerHeight) : 0;
+    const focused = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (!focused) SCR.gap = gap > 4 && gap < 140 ? gap : 0;
+    root.style.setProperty('--gap', SCR.gap + 'px');
+    // el ajuste se activa solo cuando confirmemos los números en un iPhone de verdad
+    root.classList.toggle('gapfix', SCR.gap > 0 && LS.get('gapfix', false));
+  }
+  window.addEventListener('resize', () => setTimeout(measure, 120));
+  window.addEventListener('orientationchange', () => setTimeout(measure, 400));
 
   const I = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M4 11l8-6.5 8 6.5V20h-5v-5h-6v5H4z"/></svg>',
@@ -817,13 +848,14 @@
       if ((st.top_artists || []).length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Artistas</h2></div><div class="hs">' + st.top_artists.map((a) => '<span class="card art"><span class="radio-av" style="' + bgi(a.art_url) + '"></span><span class="ct" style="text-align:center">' + esc(a.name) + '</span><span class="cs" style="text-align:center">' + a.plays + ' veces</span></span>').join('') + '</div></div>';
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
-    h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a></div>';
+    h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
+      '<p class="diag">3.0.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
   function scArtist(p) {
     const d = p.data;
-    let h = '<div class="pg"><div class="phero"><span class="pbg" style="' + bgi((d && d.art_url) || p.art) + '"></span></div><div class="ptx"><div class="pk">ARTISTA</div><div class="pt">' + esc((d && d.name) || p.name || '') + '</div></div>';
+    let h = '<div class="pg"><div class="phero"><span class="pbg" style="' + bgHi((d && d.art_url) || p.art) + '"></span></div><div class="ptx"><div class="pk">ARTISTA</div><div class="pt">' + esc((d && d.name) || p.name || '') + '</div></div>';
     if (!d) return h + '<div style="height:20px"></div>' + skelRows(5) + '</div>';
     rowsCtx(d.top || []);
     h += '<div class="pacts"><button class="pill w" type="button" data-a="artPlay">' + I.play + 'Escuchar</button><button class="pill g" type="button" data-a="artRadio">Radio</button><button class="ib" type="button" data-a="artShuf" aria-label="Aleatorio">' + I.shuf + '</button></div>';
@@ -1006,11 +1038,13 @@
     const k = url || '';
     if (w.dataset.k === k) return;
     w.dataset.k = k;
-    const css = url ? "url('" + String(url).replace(/'/g, '%27') + "')" : '';
-    if (b) b.style.backgroundImage = css;
+    if (b) b.style.backgroundImage = url ? q(url) : '';
     const d = document.createElement('div');
     d.className = 'wimg';
-    d.style.backgroundImage = css;
+    if (url) d.style.backgroundImage = q(url);
+    // la versión en alta se pone apenas carga (si YouTube no la tiene, se queda la normal)
+    const hu = hiUrl(url, true);
+    if (hu) { const im = new Image(); im.onload = () => { if (im.naturalWidth > 200 && d.isConnected) d.style.backgroundImage = q(hu) + ',' + q(url); }; im.src = hu; }
     w.appendChild(d);
     void d.offsetWidth;
     d.classList.add('on');
@@ -1533,6 +1567,7 @@
   window.CUMITO3 = { S: S, E: E, render: render, onMsg: onMsg, act: act, PV: PV };
   const rem = LS.get('m3.remember', true), lastMode = LS.get('m3.mode', null);
   if (S.me && rem && lastMode) { S.mode = lastMode; if (lastMode === 'solo') E.enter(); }
+  measure();
   render(true);
   connect();
   setInterval(() => { if (S.mode === 'home') {} if (S.tab === 'home' && !S.stack.length && S.mode) renderScreen(); }, 20000);
