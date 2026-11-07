@@ -77,14 +77,47 @@ def _row(r):
 FILTERS = {"songs": "songs", "artists": "artists", "albums": "albums", "playlists": "playlists"}
 
 
+def _videos(query: str, limit: int) -> list[dict]:
+    """YouTube normal (no YouTube Music): podcasts, capítulos, videos de cualquier cosa."""
+    from .extractor import search_sync as yt_search
+    out = []
+    for v in yt_search(query, limit, 0, "videos"):
+        if v.get("webpage_url"):
+            out.append({**v, "type": "song", "video": True})
+    return out
+
+
 def search_sync(query: str, kind: str, limit: int = 20) -> dict:
-    """kind: all | songs | artists | albums | playlists."""
+    """kind: all | songs | videos | artists | albums | playlists."""
     yt = ytmusic()
+    if kind == "videos":
+        return {"results": _videos(query, limit)}
+    if kind == "all":
+        # los videos de YouTube se buscan a la vez que lo de YouTube Music
+        import concurrent.futures
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        fut = ex.submit(_videos, query, 8)
+        try:
+            res = _search_all(yt, query)
+        finally:
+            ex.shutdown(wait=False)
+        try:
+            vids = fut.result(timeout=15)
+        except Exception as e:
+            log.warning("Videos de YouTube: %s", str(e)[:120])
+            vids = []
+        seen = {s.get("webpage_url") for s in res.get("songs") or []}
+        res["videos"] = [v for v in vids if v["webpage_url"] not in seen][:6]
+        return res
     if kind in FILTERS:
         rows = yt.search(query, filter=FILTERS[kind], limit=limit)
         if kind == "playlists" and len(rows) < 4:
             rows += yt.search(query, filter="community_playlists", limit=limit)
         return {"results": [x for x in (_row(r) for r in rows) if x][:limit]}
+    return _search_all(yt, query)
+
+
+def _search_all(yt, query: str) -> dict:
     rows = yt.search(query, limit=40)
     top, sections = None, {"songs": [], "artists": [], "albums": [], "playlists": []}
     for r in rows:

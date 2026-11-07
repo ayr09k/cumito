@@ -13,7 +13,11 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const fmt = (s) => { s = Math.max(0, Math.floor(+s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const fmt = (s) => {
+    s = Math.max(0, Math.floor(+s || 0));
+    const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, '0');
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + ss : m + ':' + ss;
+  };
   const LS = {
     get(k, d) { try { const v = localStorage.getItem('cumito.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem('cumito.' + k, JSON.stringify(v)); } catch (e) {} },
@@ -663,10 +667,10 @@
     opts = opts || {};
     const np = PV().np;
     const playing = np && np.webpage_url === t.webpage_url;
-    return '<div class="row' + (playing ? ' playing' : '') + '">' +
+    return '<div class="row' + (playing ? ' playing' : '') + (t.video ? ' vid' : '') + '">' +
       (opts.num ? '<span class="rn' + (i < 3 ? ' hot' : '') + '">' + (i + 1) + '</span>' : '') +
       '<button type="button" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-align:left" data-a="' + (opts.act || 'rowPlay') + '" data-i="' + i + '">' +
-      '<span class="rc" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span class="rt ell">' + (playing ? '<span class="eq' + (np.paused ? ' off' : '') + '" style="margin-right:7px;color:var(--lil)"><i></i><i></i><i></i></span>' : '') + esc(t.title) + '</span>' +
+      '<span class="rc' + (t.video ? ' wide' : '') + '" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span class="rt ell">' + (playing ? '<span class="eq' + (np.paused ? ' off' : '') + '" style="margin-right:7px;color:var(--lil)"><i></i><i></i><i></i></span>' : '') + esc(t.title) + '</span>' +
       '<span class="ra ell">' + esc(opts.sub ? opts.sub(t) : (t.uploader || '')) + (t.duration ? ' · ' + fmt(t.duration) : '') + '</span></span></button>' +
       (opts.remove ? '<button class="rb" type="button" aria-label="Quitar" data-a="' + opts.remove + '" data-i="' + i + '">' + I.x + '</button>' : '') +
       '<button class="rb" type="button" aria-label="Guardar en un disco" data-a="heartRow" data-i="' + i + '">' + I.heart + '</button>' +
@@ -749,7 +753,7 @@
     let h = '<div class="pg"><div class="pad"><h1 class="h1">Buscar</h1></div>' +
       '<label class="sbox">' + I.search + '<span class="hide">Buscar</span><input id="sq" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Canción, artista, playlist o link" value="' + esc(s.q) + '">' +
       (s.q ? '<button class="x" type="button" data-a="sclear" aria-label="Borrar">' + I.x.replace('<svg', '<svg width="14" height="14"') + '</button>' : '') + '</label>' +
-      '<div class="chips" style="margin-top:14px">' + [['all', 'Todo'], ['songs', 'Canciones'], ['artists', 'Artistas'], ['playlists', 'Playlists'], ['albums', 'Álbumes']]
+      '<div class="chips" style="margin-top:14px">' + [['all', 'Todo'], ['songs', 'Canciones'], ['videos', 'Videos'], ['artists', 'Artistas'], ['playlists', 'Playlists'], ['albums', 'Álbumes']]
         .map((c) => '<button class="chip' + (s.kind === c[0] ? ' on' : '') + '" type="button" data-a="skind" data-k="' + c[0] + '">' + c[1] + '</button>').join('') + '</div>';
     h += '<div id="sres">' + searchBody() + '</div>';
     return h + '</div>';
@@ -771,8 +775,8 @@
     const r = s.res || {};
     if (r.error) return '<div class="sec"><p class="tip">No pude buscar ahora. Prueba otra vez en un momento.</p></div>';
     if (s.kind === 'all') {
-      const songs = r.songs || [];
-      rowsCtx(songs);
+      const songs = r.songs || [], vids = r.videos || [];
+      rowsCtx(songs.slice(0, 5).concat(vids));
       if (r.top) {
         const t = r.top;
         if (t.type === 'artist') h += '<div class="sec"><button class="topres" type="button" data-a="topres"><span class="cv round" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span style="display:block;font-size:10.5px;font-weight:800;letter-spacing:1.1px;color:var(--lil)">MEJOR RESULTADO · ARTISTA</span><span class="disp ell" style="font-size:24px">' + esc(t.name) + '</span><span style="font-size:12px;font-weight:600;color:var(--mut)">Populares, álbumes y su radio</span></span>' + I.chev.replace('<svg', '<svg width="18" height="18"') + '</button></div>';
@@ -780,6 +784,8 @@
         else if (t.type === 'album' || t.type === 'playlist') h += '<div class="sec"><button class="topres" type="button" data-a="topres"><span class="cv" style="' + bgi(t.art_url) + '"></span><span style="flex:1;min-width:0"><span style="display:block;font-size:10.5px;font-weight:800;letter-spacing:1.1px;color:var(--lil)">MEJOR RESULTADO · ' + (t.type === 'album' ? 'ÁLBUM' : 'PLAYLIST') + '</span><span class="disp ell" style="font-size:22px">' + esc(t.title) + '</span><span class="ell" style="font-size:12px;font-weight:600;color:var(--mut)">' + esc(t.artist || t.author || '') + '</span></span>' + I.chev.replace('<svg', '<svg width="18" height="18"') + '</button></div>';
       }
       if (songs.length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2><button class="link" type="button" data-a="skind" data-k="songs">Ver más</button></div><div class="rows">' + songs.slice(0, 5).map((t, i) => songRow(t, i)).join('') + '</div></div>';
+      const off = Math.min(5, songs.length);
+      if (vids.length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Videos de YouTube</h2><button class="link" type="button" data-a="skind" data-k="videos">Ver más</button></div><div class="rows">' + vids.map((t, i) => songRow(t, off + i)).join('') + '</div></div>';
       if ((r.artists || []).length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Artistas</h2></div><div class="hs">' + r.artists.map((a, i) => cardHtml({ title: a.name, art_url: a.art_url }, 'data-a="sArtist" data-i="' + i + '"', { round: true, sub: 'Artista', noplay: true, cls: 'sm' })).join('') + '</div></div>';
       if ((r.playlists || []).length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Playlists de YouTube</h2></div><div class="hs">' + r.playlists.map((p, i) => cardHtml(p, 'data-a="sPl" data-i="' + i + '"', { sub: (p.author || 'Playlist') + (p.count ? ' · ' + p.count : ''), noplay: true })).join('') + '</div></div>';
       if ((r.albums || []).length) h += '<div class="sec"><div class="sec-h"><h2 class="h2">Álbumes</h2></div><div class="hs">' + r.albums.map((a, i) => cardHtml(a, 'data-a="sAlbum" data-i="' + i + '"', { sub: [a.artist, a.year].filter(Boolean).join(' · '), noplay: true })).join('') + '</div></div>';
@@ -788,7 +794,7 @@
     }
     const list = r.results || [];
     if (!list.length) return '<div class="sec"><p class="tip">' + (s.loading ? 'Buscando…' : 'No encontré nada con eso.') + '</p></div>';
-    if (s.kind === 'songs') { rowsCtx(list); return '<div class="sec"><div class="rows">' + list.map((t, i) => songRow(t, i)).join('') + '</div></div>'; }
+    if (s.kind === 'songs' || s.kind === 'videos') { rowsCtx(list); return '<div class="sec"><div class="rows">' + list.map((t, i) => songRow(t, i)).join('') + '</div></div>'; }
     if (s.kind === 'artists') return '<div class="sec"><div class="rows">' + list.map((a, i) => '<button class="row" type="button" data-a="sArtist" data-i="' + i + '"><span class="rc" style="border-radius:50%;' + bgi(a.art_url) + '"></span><span style="flex:1;min-width:0"><span class="rt ell">' + esc(a.name) + '</span><span class="ra">Artista</span></span>' + I.chev.replace('<svg', '<svg width="18" height="18" style="color:var(--mut)"') + '</button>').join('') + '</div></div>';
     return '<div class="sec"><div class="dgrid">' + list.map((p, i) => cardHtml(p, 'data-a="' + (s.kind === 'albums' ? 'sAlbum' : 'sPl') + '" data-i="' + i + '"', { sub: s.kind === 'albums' ? [p.artist, p.year].filter(Boolean).join(' · ') : (p.author || 'Playlist') + (p.count ? ' · ' + p.count : ''), noplay: true, cls: 'grid' })).join('').replace(/class="card grid"/g, 'class="card" style="width:auto"') + '</div></div>';
   }
