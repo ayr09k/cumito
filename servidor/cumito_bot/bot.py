@@ -219,6 +219,12 @@ class BotCore:
 
         self._register_commands()
         self.client.event(self.on_ready)
+        self.client.event(self.on_voice_state_update)
+
+    async def on_voice_state_update(self, member, before, after):
+        """Alguien entró o salió de una llamada: la app muestra quién está."""
+        if not member.bot and before.channel != after.channel:
+            self.on_change()
 
     # ---------- ciclo de vida ----------
     async def on_ready(self):
@@ -479,6 +485,7 @@ class BotCore:
             "can_prev": bool(self.played) or (bool(cur) and self._elapsed() > 5),
             "reaction": self.reaction,
             "albums_rev": self.db.albums_rev,
+            "voice_members": self._voice_names(),
             "app_id": self._app_id(),   # para que las apps muestren "Escuchando en Cumito" en Discord
         }
 
@@ -492,6 +499,18 @@ class BotCore:
     async def _guild(self):
         await self.ready.wait()
         return self.client.get_guild(self.guild_id)
+
+    def _voice_names(self):
+        """Quiénes están en la llamada con el bot (para la entrada de la app)."""
+        try:
+            g = self.client.get_guild(self.guild_id) if self.ready.is_set() else None
+            vc = g.voice_client if g else None
+            ch = vc.channel if vc else None
+            if ch is None:
+                return []
+            return [m.display_name for m in ch.members if not m.bot][:20]
+        except Exception:
+            return []
 
     async def _vc(self):
         guild = await self._guild()

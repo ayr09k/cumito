@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Cumito">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<script>window.CUMITO_MOBILE = !window.qt && /^https?:/.test(location.protocol); if (window.CUMITO_MOBILE) document.documentElement.className = 'mobile';</script>
+<script>window.CUMITO_MOBILE = !window.qt && /^https?:/.test(location.protocol); if (window.CUMITO_MOBILE && !/[?&]v2\b/.test(location.search)) location.replace('m3/'); if (window.CUMITO_MOBILE) document.documentElement.className = 'mobile';</script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>

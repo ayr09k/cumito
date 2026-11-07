@@ -49,8 +49,8 @@ class Solo:
             if not alive:
                 self._close_play(self.listening.pop(who))
                 continue
-            out.append({k: e[k] for k in ("who", "title", "uploader", "art_url", "webpage_url", "duration",
-                                          "elapsed", "paused", "at")})
+            out.append({k: e.get(k) for k in ("who", "title", "uploader", "art_url", "webpage_url", "duration",
+                                              "elapsed", "paused", "at", "with")})
         return out
 
     async def sweep(self):
@@ -92,7 +92,8 @@ class Solo:
         e = {"who": who, "title": str(t.get("title") or "")[:200], "uploader": t.get("uploader"),
              "art_url": t.get("art_url"), "webpage_url": t.get("webpage_url"),
              "duration": t.get("duration") or 0, "elapsed": float(d.get("elapsed") or 0),
-             "paused": bool(d.get("paused")), "at": time.time()}
+             "paused": bool(d.get("paused")), "at": time.time(),
+             "with": str(d.get("with"))[:40] if d.get("with") else (prev or {}).get("with") if "with" not in d else None}
         same = prev is not None and prev["webpage_url"] == e["webpage_url"] and not d.get("started")
         if same:
             e["_row"] = prev.get("_row")
@@ -101,7 +102,7 @@ class Solo:
                 self._close_play(prev)
             e["_row"] = await self._db(self.bot.db.play_start, dict(e, who=who))
         self.listening[who] = e
-        if not same or prev["paused"] != e["paused"] or abs(
+        if not same or prev["paused"] != e["paused"] or prev.get("with") != e.get("with") or abs(
                 prev["elapsed"] + (0 if prev["paused"] else e["at"] - prev["at"]) - e["elapsed"]) > 5:
             self.on_change()
 

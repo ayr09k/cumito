@@ -18,3 +18,4 @@ cumito.db-*
 portadas/
 cache_audio/
 *.tmp
+servidor/generos.json

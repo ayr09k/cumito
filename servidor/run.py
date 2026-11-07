@@ -15,6 +15,7 @@ Para cambiar algo después: edita config.json a mano, o bórralo para que
 vuelva a preguntar.
 """
 import asyncio
+import time
 import logging
 import signal
 import sys
@@ -170,6 +171,56 @@ class CumitoServer:
         except ValueError as e:   # p. ej. una imagen que no se pudo leer
             await self._reply(ws, "error", message=str(e)[:160], action=action)
 
+    async def _catalog_command(self, action, data, ws):
+        """App 3.0: buscar artistas/álbumes/playlists, perfiles e inicio."""
+        from cumito_bot import catalog
+        from cumito_bot.lanes import LANES
+        cache = self._cat_cache = getattr(self, "_cat_cache", {})
+        try:
+            if action == "cat_search":
+                q, kind = str(data.get("query") or "")[:200], str(data.get("kind") or "all")
+                key = ("s", q.lower(), kind)
+                res = cache.get(key)
+                if not res or time.time() - res[0] > 900:
+                    res = cache[key] = (time.time(), await LANES.light(catalog.search_sync, q, kind, 20, timeout=25))
+                await self._reply(ws, "cat_results", query=q, kind=kind, **res[1])
+            elif action == "artist":
+                aid = str(data.get("id") or "")
+                key = ("a", aid)
+                res = cache.get(key)
+                if not res or time.time() - res[0] > 3600:
+                    res = cache[key] = (time.time(), await LANES.light(catalog.artist_sync, aid, timeout=25))
+                await self._reply(ws, "artist", **res[1])
+            elif action == "artist_songs":
+                bid = str(data.get("id") or "")
+                tracks = await LANES.light(catalog.artist_songs_sync, bid, timeout=40)
+                await self._reply(ws, "artist_songs", id=bid, tracks=tracks)
+            elif action == "yt_album":
+                aid = str(data.get("id") or "")
+                key = ("al", aid)
+                res = cache.get(key)
+                if not res or time.time() - res[0] > 3600:
+                    res = cache[key] = (time.time(), await LANES.light(catalog.album_sync, aid, timeout=25))
+                await self._reply(ws, "yt_album", **res[1])
+            elif action == "yt_playlist":
+                from cumito_bot.extractor import playlist_sync
+                url = str(data.get("url") or "")
+                tracks, name = await LANES.light(playlist_sync, url, 200, timeout=40)
+                await self._reply(ws, "yt_playlist", url=url, name=name, tracks=tracks)
+            elif action == "home_feed":
+                seeds = [x for x in (data.get("seeds") or []) if isinstance(x, dict)][:5]
+                key = ("h", tuple(x.get("webpage_url") for x in seeds))
+                res = cache.get(key)
+                if not res or time.time() - res[0] > 1800:
+                    res = cache[key] = (time.time(), await LANES.light(catalog.home_sync, seeds, None, timeout=90))
+                await self._reply(ws, "home_feed", **res[1])
+            if len(cache) > 300:
+                for k in list(cache)[:100]:
+                    cache.pop(k, None)
+        except Exception as e:
+            logging.getLogger("cumito.catalog").warning("%s: %s", action, str(e)[:200])
+            await self._reply(ws, "cat_error", action=action, message="No pude cargar eso ahora")
+
     async def _solo_command(self, action, data, ws):
         try:
             if action == "solo_get":
@@ -191,6 +242,8 @@ class CumitoServer:
         if action == "play":
             await bot.action_play(data.get("query", ""), as_playlist=bool(data.get("as_playlist")),
                                   req=data.get("req"), who=who)
+        elif action in ("cat_search", "artist", "yt_album", "artist_songs", "home_feed", "yt_playlist"):
+            asyncio.create_task(self._catalog_command(action, data, ws))
         elif action in ("solo_get", "solo_add", "recs"):
             # modo solo: pueden tardar unos segundos, así que van aparte para no
             # frenar lo demás que mande ese mismo celular

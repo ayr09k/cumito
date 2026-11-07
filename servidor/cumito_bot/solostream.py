@@ -104,6 +104,7 @@ class Session:
         self.plan: list[dict] = []
         self.repeat = "off"
         self.radio = False
+        self.follow = None          # a quién está siguiendo ("sala"), o None
         self.stream: Stream | None = None
         self.touched = time.time()
         self.prep: dict[str, asyncio.Task] = {}
@@ -185,6 +186,8 @@ class SoloStreams:
         s.plan = items[:500]
         s.repeat = d.get("repeat") if d.get("repeat") in ("off", "all", "one") else "off"
         s.radio = bool(d.get("radio"))
+        if "with" in d:
+            s.follow = str(d.get("with"))[:40] if d.get("with") else None
         # lo que viene se va preparando ya
         if s.stream and s.stream.cur_uid is not None:
             self._prep_after(s, s.stream.cur_uid, 2)
@@ -226,7 +229,7 @@ class SoloStreams:
         s.stream.paused = paused
         cur = self._item(s, s.stream.cur_uid)
         if cur:
-            asyncio.create_task(self.solo.status(who, {"track": cur, "elapsed": float(d.get("elapsed") or 0), "paused": paused}))
+            asyncio.create_task(self.solo.status(who, {"track": cur, "elapsed": float(d.get("elapsed") or 0), "paused": paused, "with": s.follow}))
 
     def stop(self, who, d):
         s = self.sessions.get(d.get("sid") or "")
@@ -344,7 +347,7 @@ class SoloStreams:
             seg = {"uid": uid, "t0": round(sent, 3), "base": round(acc, 3)}
             st.segs.append(seg)
             await self.reply(s.ws, "solo_seg", sid=s.sid, stream=st.id, item=it, **seg)
-            asyncio.create_task(self.solo.status(s.who, {"track": it, "elapsed": acc, "started": True, "paused": st.paused}))
+            asyncio.create_task(self.solo.status(s.who, {"track": it, "elapsed": acc, "started": True, "paused": st.paused, "with": s.follow}))
             self._prep_after(s, uid, 2)
             nx_preview = self._next_item(s, uid)
             if s.radio and (nx_preview is None) and s.repeat == "off" and not (s.radio_task and not s.radio_task.done()):
