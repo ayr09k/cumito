@@ -93,6 +93,7 @@ class Stream:
         self.connected = False
         self.cur_uid = None
         self.segs: list[dict] = []
+        self.sync = None          # dónde va sonando en el celular (segundos de la transmisión), lo manda la app
 
 
 class Session:
@@ -231,6 +232,16 @@ class SoloStreams:
         if cur:
             asyncio.create_task(self.solo.status(who, {"track": cur, "elapsed": float(d.get("elapsed") or 0), "paused": paused, "with": s.follow}))
 
+    def tick(self, who, d):
+        """El celular avisa en qué segundo de la transmisión va (cada tanto y al adelantar)."""
+        s = self.sessions.get(d.get("sid") or "")
+        if not s or s.who != who or not s.stream or d.get("stream") != s.stream.id:
+            return
+        try:
+            s.stream.sync = max(0.0, float(d.get("t") or 0))
+        except (TypeError, ValueError):
+            pass
+
     def stop(self, who, d):
         s = self.sessions.get(d.get("sid") or "")
         if s and s.who == who and s.stream:
@@ -320,6 +331,22 @@ class SoloStreams:
         finally:
             st.connected = False
 
+    async def _frames(self, path):
+        cache = self.__dict__.setdefault("_fcache", {})
+        try:
+            key = (str(path), path.stat().st_mtime)
+        except OSError:
+            key = (str(path), 0)
+        hit = cache.get(key)
+        if hit:
+            return hit
+        data = await asyncio.to_thread(path.read_bytes)
+        frames = await asyncio.to_thread(adts_frames, data)
+        cache[key] = (data, frames)
+        while len(cache) > 4:
+            cache.pop(next(iter(cache)))
+        return data, frames
+
     async def _pump2(self, s, st, writer):
         loop = asyncio.get_running_loop()
         sent = 0.0                  # segundos de audio mandados
@@ -337,8 +364,7 @@ class SoloStreams:
                 nx = self._next_item(s, uid) if it else None
                 uid, pos = (nx["uid"] if nx and nx["uid"] != uid else None), 0
                 continue
-            data = await asyncio.to_thread(path.read_bytes)
-            frames = await asyncio.to_thread(adts_frames, data)
+            data, frames = await self._frames(path)
             skip, acc = 0, 0.0
             while skip < len(frames) and acc + frames[skip][2] <= pos:
                 acc += frames[skip][2]
@@ -353,19 +379,25 @@ class SoloStreams:
             if s.radio and (nx_preview is None) and s.repeat == "off" and not (s.radio_task and not s.radio_task.done()):
                 s.radio_task = asyncio.create_task(self._radio_more(s, it))
             i = skip
+            first_chunk = True
             while i < len(frames) and not st.closed:
-                # ritmo: hasta AHEAD_S por delante de lo que va sonando
+                # ritmo: cada canción empieza a mandarse cuando faltan AHEAD_S para que le
+                # toque; desde ahí se manda entera, para que adelantar dentro de ella sea al instante
                 while not st.closed:
                     now = loop.time()
+                    if st.sync is not None:
+                        clock0, paused_at = now - st.sync, (now if st.paused else None)
+                        st.sync = None
                     if st.paused:
                         if paused_at is None:
                             paused_at = now
                     elif paused_at is not None:
                         clock0 += now - paused_at
                         paused_at = None
-                    if not st.paused and sent < (now - clock0) + AHEAD_S:
+                    if not first_chunk or (not st.paused and sent < (now - clock0) + AHEAD_S):
                         break
                     await asyncio.sleep(0.25)
+                first_chunk = False
                 j, dur = i, 0.0
                 while j < len(frames) and dur < CHUNK_S:
                     dur += frames[j][2]
@@ -375,7 +407,7 @@ class SoloStreams:
                 writer.write(data[a:b])
                 await writer.drain()
                 waited = loop.time() - t_w
-                if waited > 1.0:
+                if waited > 1.0 and i >= len(frames) - 1:
                     clock0 += waited   # el celular dejó de leer (pausado por el sistema): no adelantarse
                 sent += dur
                 i = j

@@ -271,6 +271,10 @@
       if (d.req !== reqN) return;
       X.sid = d.sid; X.stream = { id: d.stream, segs: [] }; X.endAnnounced = false;
       audio.src = d.url;
+      // si en 7 s no empezó a sonar (pasa a veces al adelantar), se vuelve a pedir solo
+      clearTimeout(X.watch);
+      const sid = d.stream;
+      X.watch = setTimeout(() => { if (X.want && X.stream && X.stream.id === sid && (audio.paused || audio.readyState < 3) && !X.cut) { slog('no-arranca'); reconnect('lento'); } }, 7000);
       if (X.want) audio.play().catch((err) => {
         slog('play-fail', { err: String(err && err.name) });
         if (document.hidden) { X.pendingPlay = true; return; }
@@ -404,7 +408,17 @@
           changed(); return;
         case 'skip': next(true); return;
         case 'prev': prev(); return;
-        case 'seek': if (X.cur) { if (X.want || X.stream) playFrom(X.cur, Math.max(0, +kw.pos || 0), false); else { X.startAt = Math.max(0, +kw.pos || 0); changed(); } } return;
+        case 'seek': {
+          if (!X.cur) return;
+          const pos = Math.max(0, +kw.pos || 0);
+          if (seekLocal(pos)) return;
+          if (X.want || X.stream) {
+            X.startAt = pos; changed();
+            clearTimeout(X.seekT);
+            X.seekT = setTimeout(() => playFrom(X.cur, pos, false), 250);
+          } else { X.startAt = pos; changed(); }
+          return;
+        }
         case 'set_repeat': X.repeat = ['off', 'all', 'one'].includes(kw.mode) ? kw.mode : 'off'; X.sendPlan(); changed(); return;
         case 'shuffle': shuffleArr(X.q); X.sendPlan(); changed(); toast('Lista mezclada'); return;
         case 'set_radio': X.radio = !!kw.on; LS.set('solo.radio', X.radio); X.sendPlan(); changed(); return;
@@ -580,7 +594,32 @@
       if (X.pendingPlay && X.want) { X.pendingPlay = false; audio.play().catch(() => playFrom(X.cur, X.elapsed(), true)); return; }
       render();
     });
-    let lastTick = 0;
+    let lastTick = 0, lastTickSent = 0;
+    function tick() { if (X.sid && X.stream && !isSilent()) cmd('solo_tick', { sid: X.sid, stream: X.stream.id, t: audio.currentTime }); }
+    // adelantar/atrasar dentro de lo que ya llegó al cel: al instante, sin pedirle nada al servidor
+    function seekLocal(pos) {
+      const st = X.stream;
+      if (!st || isSilent() || X.cut) return false;
+      const sg = st.segs.find((x) => x.uid === X.cur.uid);
+      if (!sg || pos < sg.base) return false;
+      const next = st.segs[st.segs.indexOf(sg) + 1];
+      const t = sg.t0 + (pos - sg.base);
+      if (next && t >= next.t0 - 0.3) return false;
+      const b = audio.buffered;
+      let ok = false;
+      const sk = audio.seekable;
+      for (let i = 0; i < b.length; i++) if (t >= b.start(i) && t < b.end(i) - 0.5) ok = true;
+      let can = false;
+      for (let i = 0; i < sk.length; i++) if (t >= sk.start(i) && t <= sk.end(i)) can = true;
+      if (!can) ok = false;
+      if (!ok) return false;
+      try { audio.currentTime = t; } catch (e) { return false; }
+      X.startAt = pos;
+      if (X.want && audio.paused) audio.play().catch(() => {});
+      tick(); lastTickSent = performance.now();
+      changed();
+      return true;
+    }
     audio.addEventListener('timeupdate', () => {
       if (isSilent() || !X.on) return;
       const now = performance.now();
@@ -588,6 +627,7 @@
       lastTick = now;
       sync();
       saveSoon();
+      if (now - lastTickSent > 5000) { lastTickSent = now; tick(); }
     });
     function unlock() {
       if (X.unlocked) return;
@@ -948,7 +988,7 @@
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
-      '<p class="diag">3.1.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.1.3 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 

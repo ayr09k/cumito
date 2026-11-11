@@ -284,6 +284,8 @@ class CumitoServer:
             asyncio.create_task(self.solostreams.play(who, ws, data))
         elif action == "solo_plan":
             self.solostreams.plan(who, ws, data)
+        elif action == "solo_tick":
+            self.solostreams.tick(who, data)
         elif action in ("solo_pause", "solo_resume"):
             self.solostreams.pause(who, data, action == "solo_pause")
         elif action == "solo_stop":
