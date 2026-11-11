@@ -392,9 +392,10 @@
     X.handle = function (a, kw) {
       kw = kw || {};
       switch (a) {
-        case 'pause': X.want = false; audio.pause(); if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.elapsed() }); changed(); return;
+        case 'pause': if (X.cut) { clearInterval(X.cutT); X.cut = null; } X.want = false; audio.pause(); if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.elapsed() }); changed(); return;
         case 'resume':
           if (!X.cur) return;
+          if (X.cut) { unlock(); audio.play().then(endCut).catch(() => { const c = X.cut; clearInterval(X.cutT); X.cut = null; playFrom(X.cur, c.pos, true); }); return; }
           unlock();
           if (X.ended || !X.stream || isSilent()) { playFrom(X.cur, X.ended ? 0 : X.elapsed(), true); return; }
           X.want = true;
@@ -500,22 +501,55 @@
           msKey = key;
           MS.metadata = new MediaMetadata({ title: c.title || '', artist: c.uploader || '', album: 'Cumito', artwork: c.art_url ? [{ src: c.art_url, sizes: '512x512', type: 'image/jpeg' }] : [] });
         }
-        MS.playbackState = X.want ? 'playing' : 'paused';
+        MS.playbackState = X.want && !X.cut ? 'playing' : 'paused';
         if (MS.setPositionState && c.duration) MS.setPositionState({ duration: c.duration, position: Math.min(c.duration, X.elapsed()), playbackRate: 1 });
       } catch (e) {}
     }
     // eventos del audio
     audio.addEventListener('playing', () => {
       if (isSilent() || !X.on) return;
+      if (X.cut) { endCut(); return; }
       if (!X.want) { X.want = true; if (X.sid) cmd('solo_resume', { sid: X.sid, elapsed: X.elapsed() }); changed(); } else media();
     });
     audio.addEventListener('pause', () => {
       if (isSilent() || !X.on || audio.ended || !X.want || !X.stream) return;
       setTimeout(() => {
         if (!audio.paused || !X.want || audio.ended || audio.readyState < 2) return;
-        X.want = false; if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.elapsed() }); changed();
+        // nadie tocó pausa en Cumito: fue una llamada, un audio de WhatsApp, otra app...
+        // queda en pausa, pero apenas se pueda vuelve sola
+        startCut();
       }, 400);
     });
+    // ---- volver solo después de una llamada u otro audio ----
+    function startCut() {
+      if (X.cut) return;
+      X.cut = { at: Date.now(), pos: X.elapsed() };
+      slog('interrumpida');
+      if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.cut.pos });
+      changed();
+      X.cutT = setInterval(tryBack, 1500);
+    }
+    function endCut() {
+      if (!X.cut) return;
+      clearInterval(X.cutT);
+      slog('volvio', { tras: Math.round((Date.now() - X.cut.at) / 1000) });
+      X.cut = null;
+      if (X.sid) cmd('solo_resume', { sid: X.sid, elapsed: X.elapsed() });
+      changed();
+    }
+    function tryBack() {
+      if (!X.cut) return;
+      if (!X.want || !X.on) { clearInterval(X.cutT); X.cut = null; return; }
+      if (Date.now() - X.cut.at > 30 * 60 * 1000) { clearInterval(X.cutT); X.cut = null; X.want = false; changed(); return; }
+      if (!audio.paused) { endCut(); return; }
+      // si la conexión del audio se murió durante la pausa larga, se retoma desde el segundo donde iba
+      const stale = audio.networkState === 3 || audio.error || Date.now() - X.cut.at > 90000;
+      if (stale && !X.cut.re) { X.cut.re = true; playFrom(X.cur, X.cut.pos, true); return; }
+      audio.play().then(endCut).catch(() => {});
+    }
+    X.tryBack = tryBack;
+    ['visibilitychange', 'focus', 'pageshow'].forEach((ev) => (ev === 'visibilitychange' ? document : window).addEventListener(ev, () => { if (X.cut && !document.hidden) tryBack(); }));
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
     function reconnect(why) {
       if (!X.cur || !X.want) return;
       if (Date.now() - lastRe < 4000 || reTries >= 4) {
@@ -579,7 +613,7 @@
     X.view = function () {
       const c = X.cur;
       return {
-        np: c ? { title: c.title, uploader: c.uploader, art_url: c.art_url, webpage_url: c.webpage_url, duration: c.duration || 0, paused: !X.want, elapsed: X.elapsed() } : null,
+        np: c ? { title: c.title, uploader: c.uploader, art_url: c.art_url, webpage_url: c.webpage_url, duration: c.duration || 0, paused: !X.want || !!X.cut, elapsed: X.cut ? X.cut.pos : X.elapsed() } : null,
         queue: X.q.map((t) => ({ uid: t.uid, title: t.title, uploader: t.uploader, art_url: t.art_url, duration: t.duration, radio: !!t.radio, ready: true })),
         repeat: X.repeat, radio: X.radio, canPrev: X.played.length > 0 || X.elapsed() > 5,
       };
@@ -914,7 +948,7 @@
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
-      '<p class="diag">3.1 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.1.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
