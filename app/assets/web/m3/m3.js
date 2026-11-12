@@ -204,6 +204,7 @@
       else if (d.ok) toast((d.by || 'El DJ') + ' te hizo caso: «' + t + '» va después de esta', 3200);
       else toast((d.by || 'El DJ') + ' dijo que ahora no. Duele, pero se supera.', 3000);
     },
+    solo_ready(d) { E.onReady(d); },
     solo_stream(d) { E.onStream(d); },
     solo_seg(d) { E.onSeg(d); },
     solo_plan_add(d) { E.onPlanAdd(d); },
@@ -233,23 +234,49 @@
       hist: LS.get('solo.hist', []), unlocked: false, audio: audio, meta: meta,
     };
     const slog = (ev, extra) => cmd('solo_log', Object.assign({ ev: ev, hidden: document.hidden, t: (X.cur && X.cur.title) || null }, extra || {}));
-    function plan() { return (X.follow ? [X.cur] : [X.cur].concat(X.q)).filter(Boolean).map((t) => Object.assign(meta(t), { uid: t.uid })); }
-    function opts() { return { repeat: X.follow ? 'off' : X.repeat, radio: !!(X.radio && !X.follow), with: X.follow || null }; }
-    X.sendPlan = function () {
-      clearTimeout(planT);
-      planT = setTimeout(() => { if (X.sid && X.stream) cmd('solo_plan', Object.assign({ sid: X.sid, items: plan() }, opts())); }, 250);
-    };
-    function curSeg() {
-      const st = X.stream;
-      if (!st || !st.segs.length) return null;
-      const t = audio.currentTime + 0.05;
-      let sg = null;
-      for (const x of st.segs) if (x.t0 <= t) sg = x;
-      return sg;
+    // ---- motor 4: cada canción es un archivo normal (/audio/...m4a) ----
+    // El servidor la baja y la publica; el cel la toca como cualquier archivo, así
+    // adelantar es instantáneo y nunca se "reinicia". La siguiente siempre se pide
+    // antes de que termine la actual, para que el cambio sea inmediato aunque la
+    // pantalla esté apagada.
+    const SRC = {};      // webpage_url -> '/audio/....m4a'
+    const ASKED = {};    // webpage_url -> cuándo se pidió
+    const absUrl = (u) => new URL(u, location.href).href;
+    const loadedUrl = () => (isSilent() ? null : audio.src);
+    X.sendPlan = function () { clearTimeout(planT); planT = setTimeout(prefetch, 200); };
+    function ask(t, urgent) {
+      if (!t || !t.webpage_url || SRC[t.webpage_url]) return;
+      const at = ASKED[t.webpage_url];
+      if (at && Date.now() - at < (urgent ? 8000 : 60000)) return;
+      if (cmd('solo_get', { url: t.webpage_url, title: t.title, pre: !urgent })) ASKED[t.webpage_url] = Date.now();
     }
+    function prefetch() {
+      if (!X.on) return;
+      if (X.cur) ask(X.cur, true);
+      if (!X.follow) X.q.slice(0, 2).forEach((t) => ask(t, false));
+    }
+    X.onReady = function (d) {
+      const url = d.url;
+      if (d.error) {
+        delete ASKED[url];
+        if (X.cur && X.cur.webpage_url === url && X.want && X.waiting) {
+          X.waiting = false;
+          slog('no-se-pudo', { err: d.error });
+          toast('No pude poner «' + (X.cur.title || 'esa') + '». Sigo con la que viene.');
+          next(false);
+        }
+        return;
+      }
+      SRC[url] = d.src;
+      if (d.webpage_url) SRC[d.webpage_url] = d.src;
+      [X.cur].concat(X.q).forEach((t) => {
+        if (t && t.webpage_url === url) ['title', 'uploader', 'duration', 'art_url'].forEach((k) => { if (d[k] && (!t[k] || t[k] === 'Cargando…')) t[k] = d[k]; });
+      });
+      if (X.cur && X.cur.webpage_url === url && X.waiting) load(X.cur, X.startAt);
+      changed();
+    };
     X.elapsed = function () {
-      const sg = curSeg();
-      if (sg && X.cur && sg.uid === X.cur.uid && !isSilent()) return Math.max(0, sg.base + audio.currentTime - sg.t0);
+      if (X.cur && X.playUid === X.cur.uid && loadedUrl() && audio.readyState > 0 && X.seekTo == null) return Math.max(0, audio.currentTime);
       return X.startAt || 0;
     };
     const findUid = (uid) => (X.cur && X.cur.uid === uid ? X.cur : X.q.find((t) => t.uid === uid) || null);
@@ -257,60 +284,44 @@
     function changed() { save(); media(); render(); }
     function playFrom(t, pos, keepFollow) {
       if (!t) return;
-      if (!feat('solo_stream')) { toast('El servidor se está actualizando. Prueba en un minuto'); return; }
+      if (!feat('solo')) { toast('El servidor se está actualizando. Prueba en un minuto'); return; }
       if (X.cur && X.cur !== t && !X.q.includes(X.cur)) pushPlayed(X.cur);
       X.cur = t; X.want = true; X.ended = false; X.startAt = pos || 0;
       if (!keepFollow) X.follow = null;
       addHist(t);
-      X.stream = null; X.endAnnounced = false;
-      if (!isSilent()) audio.pause();
-      cmd('solo_play', Object.assign({ sid: X.sid, req: ++reqN, items: plan(), uid: t.uid, pos: pos || 0 }, opts()));
+      if (SRC[t.webpage_url]) load(t, pos || 0);
+      else {
+        X.waiting = true; X.playUid = null;
+        if (!isSilent()) audio.pause();
+        ask(t, true);
+      }
+      prefetch();
       changed();
     }
-    X.onStream = function (d) {
-      if (d.req !== reqN) return;
-      X.sid = d.sid; X.stream = { id: d.stream, segs: [] }; X.endAnnounced = false;
-      audio.src = d.url;
-      // si en 7 s no empezó a sonar (pasa a veces al adelantar), se vuelve a pedir solo
-      clearTimeout(X.watch);
-      const sid = d.stream;
-      X.watch = setTimeout(() => { if (X.want && X.stream && X.stream.id === sid && (audio.paused || audio.readyState < 3) && !X.cut) { slog('no-arranca'); reconnect('lento'); } }, 7000);
+    // poner el archivo y saltar al segundo pedido
+    function load(t, pos) {
+      X.waiting = false;
+      const src = absUrl(SRC[t.webpage_url]);
+      const same = X.playUid === t.uid && audio.src === src;
+      X.playUid = t.uid; X.stream = { id: t.uid };
+      if (!same) { audio.src = src; X.seekTo = pos > 0.5 ? pos : null; }
+      else if (Math.abs(audio.currentTime - pos) > 0.5) { try { audio.currentTime = pos; } catch (e) { X.seekTo = pos; } }
+      const tok = X.loadTok = (X.loadTok || 0) + 1;
       if (X.want) audio.play().catch((err) => {
-        slog('play-fail', { err: String(err && err.name) });
+        const name = String(err && err.name);
+        slog('play-fail', { err: name });
+        // un archivo que no cargó lo maneja el evento "error"; aquí solo importa que el cel no deje sonar
+        if (tok !== X.loadTok || name !== 'NotAllowedError') return;
         if (document.hidden) { X.pendingPlay = true; return; }
         X.want = false; changed(); toast('Toca ▶ para empezar');
       });
-    };
-    X.onSeg = function (d) {
-      if (!X.stream || d.stream !== X.stream.id) return;
-      if (!d.t0) X.stream.segs = [];
-      X.stream.segs.push({ uid: d.uid, t0: d.t0, base: d.base });
-      const t = findUid(d.uid);
-      if (t && d.item) ['title', 'uploader', 'duration', 'art_url'].forEach((k) => { if (d.item[k] && (!t[k] || t[k] === 'Cargando…')) t[k] = d.item[k]; });
-      reTries = 0;
-      sync();
-      changed();
-    };
-    X.onPlanAdd = function (d) {
-      if (d.sid !== X.sid) return;
-      (d.items || []).forEach((it) => { if (!findUid(it.uid)) X.q.push(mk(it, { uid: it.uid, radio: true })); });
-      changed();
-    };
-    X.onEnd = function (d) { if (X.stream && d.stream === X.stream.id) X.endAnnounced = true; };
-    function sync() {
-      const sg = curSeg();
-      if (!sg || (X.cur && sg.uid === X.cur.uid)) return;
-      const i = X.q.findIndex((t) => t.uid === sg.uid);
-      if (i < 0) return;
-      const skipped = X.q.splice(0, i);
-      const t = X.q.shift();
-      if (X.cur) { if (X.repeat === 'all') X.q.push(X.cur); else pushPlayed(X.cur); }
-      skipped.forEach(pushPlayed);
-      X.cur = t;
-      addHist(t);
-      changed();
-      X.sendPlan();
+      X.report(true);
     }
+    audio.addEventListener('loadedmetadata', () => {
+      if (X.seekTo != null) { const p = X.seekTo; X.seekTo = null; try { audio.currentTime = p; } catch (e) {} }
+    });
+    X.onStream = X.onSeg = X.onPlanAdd = X.onEnd = function () {};
+    function sync() {}
     function next(manual) {
       if (manual) X.follow = null;
       const t = X.q.shift();
@@ -325,7 +336,6 @@
     function stopAtEnd() {
       X.want = false; X.ended = true;
       if (!isSilent()) audio.pause();
-      if (X.sid) cmd('solo_stop', { sid: X.sid });
       X.report(false); changed();
     }
     function prev() {
@@ -396,27 +406,27 @@
     X.handle = function (a, kw) {
       kw = kw || {};
       switch (a) {
-        case 'pause': if (X.cut) { clearInterval(X.cutT); X.cut = null; } X.want = false; audio.pause(); if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.elapsed() }); changed(); return;
+        case 'pause': if (X.cut) { clearInterval(X.cutT); X.cut = null; } X.want = false; audio.pause(); X.report(false); changed(); return;
         case 'resume':
           if (!X.cur) return;
           if (X.cut) { unlock(); audio.play().then(endCut).catch(() => { const c = X.cut; clearInterval(X.cutT); X.cut = null; playFrom(X.cur, c.pos, true); }); return; }
           unlock();
-          if (X.ended || !X.stream || isSilent()) { playFrom(X.cur, X.ended ? 0 : X.elapsed(), true); return; }
+          if (X.ended || X.playUid !== X.cur.uid || isSilent()) { playFrom(X.cur, X.ended ? 0 : X.elapsed(), true); return; }
           X.want = true;
           audio.play().catch(() => playFrom(X.cur, X.elapsed(), true));
-          cmd('solo_resume', { sid: X.sid, elapsed: X.elapsed() });
+          X.report(false);
           changed(); return;
         case 'skip': next(true); return;
         case 'prev': prev(); return;
         case 'seek': {
           if (!X.cur) return;
           const pos = Math.max(0, +kw.pos || 0);
-          if (seekLocal(pos)) return;
-          if (X.want || X.stream) {
-            X.startAt = pos; changed();
-            clearTimeout(X.seekT);
-            X.seekT = setTimeout(() => playFrom(X.cur, pos, false), 250);
-          } else { X.startAt = pos; changed(); }
+          X.startAt = pos;
+          if (X.playUid === X.cur.uid && loadedUrl()) {
+            if (audio.readyState > 0) { try { audio.currentTime = pos; } catch (e) { X.seekTo = pos; } } else X.seekTo = pos;
+            setTimeout(() => X.report(false), 300);
+          }
+          changed();
           return;
         }
         case 'set_repeat': X.repeat = ['off', 'all', 'one'].includes(kw.mode) ? kw.mode : 'off'; X.sendPlan(); changed(); return;
@@ -468,7 +478,7 @@
       const url = tg.track.webpage_url;
       if (!X.cur || X.cur.webpage_url !== url) playFrom(mk(meta(tg.track), { room: true }), tg.elapsed, true);
       else if (force && Math.abs(X.elapsed() - tg.elapsed) > 5) playFrom(X.cur, tg.elapsed, true);
-      if (tg.paused && X.want) { X.want = false; audio.pause(); if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.elapsed() }); changed(); }
+      if (tg.paused && X.want) { X.want = false; audio.pause(); X.report(false); changed(); }
       else if (!tg.paused && !X.want && X.cur && !force) X.handle('resume');
     }
     X.onGroup = function () { if (X.on && X.follow) syncFollow(false); };
@@ -483,7 +493,6 @@
     X.leave = function () {
       if (!X.on) return;
       cmd('solo_status', { track: null });
-      if (X.sid) cmd('solo_stop', { sid: X.sid });
       X.on = false; X.want = false; X.follow = null; X.stream = null;
       if (!isSilent()) audio.pause();
       media();
@@ -523,10 +532,11 @@
     audio.addEventListener('playing', () => {
       if (isSilent() || !X.on) return;
       if (X.cut) { endCut(); return; }
-      if (!X.want) { X.want = true; if (X.sid) cmd('solo_resume', { sid: X.sid, elapsed: X.elapsed() }); changed(); } else media();
+      reTries = 0;
+      if (!X.want) { X.want = true; X.report(false); changed(); } else media();
     });
     audio.addEventListener('pause', () => {
-      if (isSilent() || !X.on || audio.ended || !X.want || !X.stream) return;
+      if (isSilent() || !X.on || audio.ended || !X.want || X.waiting) return;
       setTimeout(() => {
         if (!audio.paused || !X.want || audio.ended || audio.readyState < 2) return;
         // nadie tocó pausa en Cumito: fue una llamada, un audio de WhatsApp, otra app...
@@ -539,7 +549,7 @@
       if (X.cut) return;
       X.cut = { at: Date.now(), pos: X.elapsed() };
       slog('interrumpida');
-      if (X.sid) cmd('solo_pause', { sid: X.sid, elapsed: X.cut.pos });
+      X.report(false);
       changed();
       X.cutT = setInterval(tryBack, 1500);
     }
@@ -548,7 +558,7 @@
       clearInterval(X.cutT);
       slog('volvio', { tras: Math.round((Date.now() - X.cut.at) / 1000) });
       X.cut = null;
-      if (X.sid) cmd('solo_resume', { sid: X.sid, elapsed: X.elapsed() });
+      X.report(false);
       changed();
     }
     function tryBack() {
@@ -557,7 +567,7 @@
       if (Date.now() - X.cut.at > 30 * 60 * 1000) { clearInterval(X.cutT); X.cut = null; X.want = false; changed(); return; }
       if (!audio.paused) { endCut(); return; }
       // si la conexión del audio se murió durante la pausa larga, se retoma desde el segundo donde iba
-      const stale = audio.networkState === 3 || audio.error || Date.now() - X.cut.at > 90000;
+      const stale = audio.networkState === 3 || audio.error;
       if (stale && !X.cut.re) { X.cut.re = true; playFrom(X.cur, X.cut.pos, true); return; }
       audio.play().then(endCut).catch(() => {});
     }
@@ -566,68 +576,48 @@
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
     function reconnect(why) {
       if (!X.cur || !X.want) return;
-      if (Date.now() - lastRe < 4000 || reTries >= 4) {
+      if (Date.now() - lastRe < 3000 || reTries >= 4) {
         if (reTries >= 4) { slog('give-up', { why: why }); X.want = false; changed(); toast('Se cortó la música. Toca ▶ para seguir'); }
         return;
       }
       lastRe = Date.now(); reTries++;
-      slog('reconnect', { why: why, at: Math.round(X.elapsed()) });
-      sync();
-      playFrom(X.cur, X.elapsed(), true);
+      const pos = X.elapsed();
+      slog('reconnect', { why: why, at: Math.round(pos) });
+      // el archivo pudo haberse borrado del servidor: se pide de nuevo
+      delete SRC[X.cur.webpage_url]; delete ASKED[X.cur.webpage_url];
+      X.playUid = null;
+      playFrom(X.cur, pos, true);
     }
     audio.addEventListener('ended', () => {
       if (isSilent() || !X.on) return;
-      sync();
-      if (!X.endAnnounced && X.want) return reconnect('ended');
       if (X.follow) {
         X.want = false; changed();
         const c = X.cur, who = X.follow;
         setTimeout(() => { if (X.follow === who && X.cur === c) { X.follow = null; toast('Se cortó la sala: sigo con tu lista'); next(false); } }, 7000);
         return;
       }
+      // terminó de verdad: la siguiente ya está lista, se pone en el mismo instante
+      if (X.repeat === 'one' && X.cur) { audio.currentTime = 0; audio.play().catch(() => {}); X.report(true); return; }
+      if (X.q.length || X.radio) { next(false); return; }
       X.want = false; X.ended = true; X.report(false); changed();
     });
-    audio.addEventListener('error', () => { if (!isSilent() && X.on && X.stream) reconnect('error'); });
+    audio.addEventListener('error', () => { if (!isSilent() && X.on && X.playUid) reconnect('error'); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden || !X.on || !X.cur) return;
-      sync();
       if (X.pendingPlay && X.want) { X.pendingPlay = false; audio.play().catch(() => playFrom(X.cur, X.elapsed(), true)); return; }
       render();
     });
-    let lastTick = 0, lastTickSent = 0;
-    function tick() { if (X.sid && X.stream && !isSilent()) cmd('solo_tick', { sid: X.sid, stream: X.stream.id, t: audio.currentTime }); }
-    // adelantar/atrasar dentro de lo que ya llegó al cel: al instante, sin pedirle nada al servidor
-    function seekLocal(pos) {
-      const st = X.stream;
-      if (!st || isSilent() || X.cut) return false;
-      const sg = st.segs.find((x) => x.uid === X.cur.uid);
-      if (!sg || pos < sg.base) return false;
-      const next = st.segs[st.segs.indexOf(sg) + 1];
-      const t = sg.t0 + (pos - sg.base);
-      if (next && t >= next.t0 - 0.3) return false;
-      const b = audio.buffered;
-      let ok = false;
-      const sk = audio.seekable;
-      for (let i = 0; i < b.length; i++) if (t >= b.start(i) && t < b.end(i) - 0.5) ok = true;
-      let can = false;
-      for (let i = 0; i < sk.length; i++) if (t >= sk.start(i) && t <= sk.end(i)) can = true;
-      if (!can) ok = false;
-      if (!ok) return false;
-      try { audio.currentTime = t; } catch (e) { return false; }
-      X.startAt = pos;
-      if (X.want && audio.paused) audio.play().catch(() => {});
-      tick(); lastTickSent = performance.now();
-      changed();
-      return true;
-    }
+    let lastTick = 0, radioAsked = null;
     audio.addEventListener('timeupdate', () => {
       if (isSilent() || !X.on) return;
       const now = performance.now();
       if (now - lastTick < 700) return;
       lastTick = now;
-      sync();
       saveSoon();
-      if (now - lastTickSent > 5000) { lastTickSent = now; tick(); }
+      // la radio se pide antes de que se acabe la lista, para que la siguiente esté lista a tiempo
+      const left = (audio.duration || (X.cur && X.cur.duration) || 0) - audio.currentTime;
+      if (X.radio && !X.follow && X.cur && X.q.length === 0 && left > 0 && left < 50 && radioAsked !== X.cur.uid) { radioAsked = X.cur.uid; fetchRadio(X.cur, false, false); }
+      if (left > 0 && left < 60) prefetch();
     });
     function unlock() {
       if (X.unlocked) return;
@@ -988,7 +978,8 @@
       if ((st.top_songs || []).length) { S.tuRows = st.top_songs; h += '<div class="sec"><div class="sec-h"><h2 class="h2">Canciones</h2></div><div class="rows">' + st.top_songs.map((t, i) => songRow(t, i, { num: true, act: 'tuPlay', sub: (x) => (x.uploader || '') + ' · ' + x.plays + ' veces' })).join('') + '</div></div>'; rowsCtx(st.top_songs); }
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
-      '<p class="diag">3.1.3 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<a class="opt quiet" href="../m3s/"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Motor de música anterior</b><small>La transmisión en vivo, por si el nuevo falla con la pantalla apagada</small></span></a>' +
+      '<p class="diag">3.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
@@ -1867,7 +1858,7 @@
   document.addEventListener('pointermove', (e) => { if (LP.el && Math.hypot(e.clientX - LP.x, e.clientY - LP.y) > 10) lpCancel(); });
   // el toque que sigue a un "mantener" no cuenta como toque
   document.addEventListener('click', (e) => {
-    if (LP.fired && Date.now() - LP.at < 900 && e.target.closest('[data-lp]') === LP.fired) { e.stopPropagation(); e.preventDefault(); }
+    if (LP.fired && Date.now() - LP.at < 900) { e.stopPropagation(); e.preventDefault(); }
     LP.fired = null;
   }, true);
 
