@@ -157,7 +157,9 @@ class SoloStreams:
                 return
             if st.connected:   # el navegador abrió otra conexión a la misma: la vieja se suelta
                 st.closed = True
-                st = self._new_stream(sess, st.start_uid, st.start_pos, reuse=st)
+                # se sigue desde lo que estaba sonando (antes volvía al principio: el "reinicio a media canción")
+                uid, pos = self._playhead(st)
+                st = self._new_stream(sess, uid, pos, reuse=st)
             await self._pump(sess, st, writer)
         except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError, ValueError):
             pass
@@ -168,6 +170,20 @@ class SoloStreams:
                 writer.close()
             except Exception:
                 pass
+
+    def _playhead(self, st):
+        """Qué canción y en qué segundo va sonando en el celular, según el reloj de la transmisión."""
+        c0 = getattr(st, "clock0", None)
+        if c0 is None or not st.segs:
+            return st.start_uid, st.start_pos
+        t = asyncio.get_running_loop().time() - c0
+        if getattr(st, "paused_at", None) is not None:
+            t = st.paused_at - c0
+        seg = st.segs[0]
+        for x in st.segs:
+            if x["t0"] <= t:
+                seg = x
+        return seg["uid"], max(0.0, seg["base"] + t - seg["t0"] - 1.0)
 
     # ---------- órdenes del celular ----------
     def _session(self, sid, who, ws):
@@ -394,6 +410,7 @@ class SoloStreams:
                     elif paused_at is not None:
                         clock0 += now - paused_at
                         paused_at = None
+                    st.clock0, st.paused_at = clock0, paused_at
                     if not first_chunk or (not st.paused and sent < (now - clock0) + AHEAD_S):
                         break
                     await asyncio.sleep(0.25)

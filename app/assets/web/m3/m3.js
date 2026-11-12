@@ -243,7 +243,77 @@
     const ASKED = {};    // webpage_url -> cuándo se pidió
     const absUrl = (u) => new URL(u, location.href).href;
     const loadedUrl = () => (isSilent() ? null : audio.src);
-    X.sendPlan = function () { clearTimeout(planT); planT = setTimeout(prefetch, 200); };
+    // Con la pantalla prendida suena archivo por archivo (adelantar es instantáneo).
+    // Al apagarse la pantalla se pasa a la transmisión continua del servidor, que es
+    // lo único que el iPhone deja seguir de una canción a otra en segundo plano.
+    X.mode = 'file';
+    function plan() { return (X.follow ? [X.cur] : [X.cur].concat(X.q)).filter(Boolean).map((t) => Object.assign(meta(t), { uid: t.uid })); }
+    function opts() { return { repeat: X.follow ? 'off' : X.repeat, radio: !!(X.radio && !X.follow), with: X.follow || null }; }
+    X.sendPlan = function () {
+      clearTimeout(planT);
+      planT = setTimeout(() => { prefetch(); if (X.mode === 'stream' && X.sid && X.stream) cmd('solo_plan', Object.assign({ sid: X.sid, items: plan() }, opts())); }, 200);
+    };
+    const canStream = () => feat('solo_stream');
+    function startStream(pos) {
+      if (!X.cur || !canStream()) return false;
+      X.streamReq = ++reqN;
+      X.endAnnounced = false;
+      slog('a-transmision', { at: Math.round(pos) });
+      return cmd('solo_play', Object.assign({ sid: X.sid, req: X.streamReq, items: plan(), uid: X.cur.uid, pos: pos || 0 }, opts()));
+    }
+    function stopStream() {
+      if (X.mode !== 'stream') return;
+      if (X.sid) cmd('solo_stop', { sid: X.sid });
+      X.mode = 'file'; X.stream = null; X.streamReq = 0;
+    }
+    function curSeg() {
+      const st = X.stream;
+      if (X.mode !== 'stream' || !st || !st.segs || !st.segs.length) return null;
+      const t = audio.currentTime + 0.05;
+      let sg = null;
+      for (const x of st.segs) if (x.t0 <= t) sg = x;
+      return sg;
+    }
+    X.onStream = function (d) {
+      if (!X.streamReq || d.req !== X.streamReq) return;
+      X.sid = d.sid; X.mode = 'stream'; X.stream = { id: d.stream, segs: [] }; X.playUid = null;
+      audio.src = d.url;
+      if (X.want) audio.play().catch((err) => slog('play-fail', { err: String(err && err.name), en: 'transmision' }));
+    };
+    X.onSeg = function (d) {
+      if (X.mode !== 'stream' || !X.stream || d.stream !== X.stream.id) return;
+      if (!d.t0) X.stream.segs = [];
+      X.stream.segs.push({ uid: d.uid, t0: d.t0, base: d.base });
+      const t = findUid(d.uid);
+      if (t && d.item) ['title', 'uploader', 'duration', 'art_url'].forEach((k) => { if (d.item[k] && (!t[k] || t[k] === 'Cargando…')) t[k] = d.item[k]; });
+      ssync(); changed();
+    };
+    X.onPlanAdd = function (d) {
+      if (d.sid !== X.sid) return;
+      (d.items || []).forEach((it) => { if (!findUid(it.uid)) X.q.push(mk(it, { uid: it.uid, radio: true })); });
+      changed();
+    };
+    X.onEnd = function (d) { if (X.stream && d.stream === X.stream.id) X.endAnnounced = true; };
+    // en la transmisión, cuando empieza la siguiente se avanza la lista
+    function ssync() {
+      const sg = curSeg();
+      if (!sg || (X.cur && sg.uid === X.cur.uid)) return;
+      const i = X.q.findIndex((t) => t.uid === sg.uid);
+      if (i < 0) return;
+      const skipped = X.q.splice(0, i);
+      const t = X.q.shift();
+      if (X.cur) { if (X.repeat === 'all') X.q.push(X.cur); else pushPlayed(X.cur); }
+      skipped.forEach(pushPlayed);
+      X.cur = t;
+      addHist(t);
+      changed();
+    }
+    function goHidden() {
+      if (!document.hidden || !X.on || !X.want || X.mode === 'stream' || X.waiting || X.cut || !X.cur) return;
+      startStream(X.elapsed());
+    }
+    document.addEventListener('visibilitychange', goHidden);
+    window.addEventListener('pagehide', goHidden);
     function ask(t, urgent) {
       if (!t || !t.webpage_url || SRC[t.webpage_url]) return;
       const at = ASKED[t.webpage_url];
@@ -276,6 +346,8 @@
       changed();
     };
     X.elapsed = function () {
+      const sg = curSeg();
+      if (sg) return sg.uid === (X.cur && X.cur.uid) ? Math.max(0, sg.base + audio.currentTime - sg.t0) : 0;
       if (X.cur && X.playUid === X.cur.uid && loadedUrl() && audio.readyState > 0 && X.seekTo == null) return Math.max(0, audio.currentTime);
       return X.startAt || 0;
     };
@@ -289,6 +361,14 @@
       X.cur = t; X.want = true; X.ended = false; X.startAt = pos || 0;
       if (!keepFollow) X.follow = null;
       addHist(t);
+      if (document.hidden && canStream()) {
+        X.mode === 'stream' && (X.stream = null);
+        if (!isSilent()) audio.pause();
+        startStream(pos || 0);
+        changed();
+        return;
+      }
+      stopStream();
       if (SRC[t.webpage_url]) load(t, pos || 0);
       else {
         X.waiting = true; X.playUid = null;
@@ -316,12 +396,13 @@
         X.want = false; changed(); toast('Toca ▶ para empezar');
       });
       X.report(true);
+      // si justo se apagó la pantalla mientras cargaba, igual se pasa a la transmisión
+      setTimeout(goHidden, 1500);
     }
     audio.addEventListener('loadedmetadata', () => {
       if (X.seekTo != null) { const p = X.seekTo; X.seekTo = null; try { audio.currentTime = p; } catch (e) {} }
     });
-    X.onStream = X.onSeg = X.onPlanAdd = X.onEnd = function () {};
-    function sync() {}
+    function sync() { ssync(); }
     function next(manual) {
       if (manual) X.follow = null;
       const t = X.q.shift();
@@ -406,11 +487,15 @@
     X.handle = function (a, kw) {
       kw = kw || {};
       switch (a) {
-        case 'pause': if (X.cut) { clearInterval(X.cutT); X.cut = null; } X.want = false; audio.pause(); X.report(false); changed(); return;
+        case 'pause': if (X.cut) { clearInterval(X.cutT); X.cut = null; } X.want = false; audio.pause(); if (X.mode === 'stream' && X.sid) cmd('solo_pause', { sid: X.sid }); X.report(false); changed(); return;
         case 'resume':
           if (!X.cur) return;
           if (X.cut) { unlock(); audio.play().then(endCut).catch(() => { const c = X.cut; clearInterval(X.cutT); X.cut = null; playFrom(X.cur, c.pos, true); }); return; }
           unlock();
+          if (X.mode === 'stream' && X.stream && !isSilent() && !X.ended) {
+            X.want = true; audio.play().catch(() => playFrom(X.cur, X.elapsed(), true));
+            if (X.sid) cmd('solo_resume', { sid: X.sid }); X.report(false); changed(); return;
+          }
           if (X.ended || X.playUid !== X.cur.uid || isSilent()) { playFrom(X.cur, X.ended ? 0 : X.elapsed(), true); return; }
           X.want = true;
           audio.play().catch(() => playFrom(X.cur, X.elapsed(), true));
@@ -421,6 +506,7 @@
         case 'seek': {
           if (!X.cur) return;
           const pos = Math.max(0, +kw.pos || 0);
+          if (X.mode === 'stream') { playFrom(X.cur, pos, true); return; }
           X.startAt = pos;
           if (X.playUid === X.cur.uid && loadedUrl()) {
             if (audio.readyState > 0) { try { audio.currentTime = pos; } catch (e) { X.seekTo = pos; } } else X.seekTo = pos;
@@ -493,6 +579,7 @@
     X.leave = function () {
       if (!X.on) return;
       cmd('solo_status', { track: null });
+      stopStream();
       X.on = false; X.want = false; X.follow = null; X.stream = null;
       if (!isSilent()) audio.pause();
       media();
@@ -536,7 +623,7 @@
       if (!X.want) { X.want = true; X.report(false); changed(); } else media();
     });
     audio.addEventListener('pause', () => {
-      if (isSilent() || !X.on || audio.ended || !X.want || X.waiting) return;
+      if (isSilent() || !X.on || audio.ended || !X.want || X.waiting || (X.mode === 'stream' && !X.stream)) return;
       setTimeout(() => {
         if (!audio.paused || !X.want || audio.ended || audio.readyState < 2) return;
         // nadie tocó pausa en Cumito: fue una llamada, un audio de WhatsApp, otra app...
@@ -549,6 +636,7 @@
       if (X.cut) return;
       X.cut = { at: Date.now(), pos: X.elapsed() };
       slog('interrumpida');
+      if (X.mode === 'stream' && X.sid) cmd('solo_pause', { sid: X.sid });
       X.report(false);
       changed();
       X.cutT = setInterval(tryBack, 1500);
@@ -558,6 +646,7 @@
       clearInterval(X.cutT);
       slog('volvio', { tras: Math.round((Date.now() - X.cut.at) / 1000) });
       X.cut = null;
+      if (X.mode === 'stream' && X.sid) cmd('solo_resume', { sid: X.sid });
       X.report(false);
       changed();
     }
@@ -590,6 +679,13 @@
     }
     audio.addEventListener('ended', () => {
       if (isSilent() || !X.on) return;
+      if (X.mode === 'stream') {
+        ssync();
+        if (!X.endAnnounced && X.want) { slog('corte-transmision'); playFrom(X.cur, X.elapsed(), true); return; }
+        stopStream();
+        if (X.follow) { X.want = false; changed(); return; }
+        X.want = false; X.ended = true; X.report(false); changed(); return;
+      }
       if (X.follow) {
         X.want = false; changed();
         const c = X.cur, who = X.follow;
@@ -601,19 +697,28 @@
       if (X.q.length || X.radio) { next(false); return; }
       X.want = false; X.ended = true; X.report(false); changed();
     });
-    audio.addEventListener('error', () => { if (!isSilent() && X.on && X.playUid) reconnect('error'); });
+    audio.addEventListener('error', () => {
+      if (isSilent() || !X.on) return;
+      if (X.mode === 'stream' && X.stream && X.want) { slog('error-transmision'); X.stream = null; playFrom(X.cur, X.elapsed(), true); return; }
+      if (X.playUid) reconnect('error');
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden || !X.on || !X.cur) return;
       if (X.pendingPlay && X.want) { X.pendingPlay = false; audio.play().catch(() => playFrom(X.cur, X.elapsed(), true)); return; }
       render();
     });
-    let lastTick = 0, radioAsked = null;
+    let lastTick = 0, lastTickSent = 0, radioAsked = null;
     audio.addEventListener('timeupdate', () => {
       if (isSilent() || !X.on) return;
       const now = performance.now();
       if (now - lastTick < 700) return;
       lastTick = now;
       saveSoon();
+      if (X.mode === 'stream') {
+        ssync();
+        if (now - lastTickSent > 5000 && X.sid && X.stream) { lastTickSent = now; cmd('solo_tick', { sid: X.sid, stream: X.stream.id, t: audio.currentTime }); }
+        return;
+      }
       // la radio se pide antes de que se acabe la lista, para que la siguiente esté lista a tiempo
       const left = (audio.duration || (X.cur && X.cur.duration) || 0) - audio.currentTime;
       if (X.radio && !X.follow && X.cur && X.q.length === 0 && left > 0 && left < 50 && radioAsked !== X.cur.uid) { radioAsked = X.cur.uid; fetchRadio(X.cur, false, false); }
@@ -979,7 +1084,7 @@
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
       '<a class="opt quiet" href="../m3s/"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Motor de música anterior</b><small>La transmisión en vivo, por si el nuevo falla con la pantalla apagada</small></span></a>' +
-      '<p class="diag">3.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.2.1 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
