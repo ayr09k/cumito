@@ -276,6 +276,7 @@
     }
     X.onStream = function (d) {
       if (!X.streamReq || d.req !== X.streamReq) return;
+      slog('transmision-lista');
       X.sid = d.sid; X.mode = 'stream'; X.stream = { id: d.stream, segs: [] }; X.playUid = null;
       audio.src = d.url;
       if (X.want) audio.play().catch((err) => slog('play-fail', { err: String(err && err.name), en: 'transmision' }));
@@ -305,6 +306,7 @@
       if (X.cur) { if (X.repeat === 'all') X.q.push(X.cur); else pushPlayed(X.cur); }
       skipped.forEach(pushPlayed);
       X.cur = t;
+      slog('siguiente-transmision');
       addHist(t);
       changed();
     }
@@ -618,6 +620,7 @@
     // eventos del audio
     audio.addEventListener('playing', () => {
       if (isSilent() || !X.on) return;
+      if (document.hidden) slog('suena', { modo: X.mode });
       if (X.cut) { endCut(); return; }
       reTries = 0;
       if (!X.want) { X.want = true; X.report(false); changed(); } else media();
@@ -625,7 +628,7 @@
     audio.addEventListener('pause', () => {
       if (isSilent() || !X.on || audio.ended || !X.want || X.waiting || (X.mode === 'stream' && !X.stream)) return;
       setTimeout(() => {
-        if (!audio.paused || !X.want || audio.ended || audio.readyState < 2) return;
+        if (!audio.paused || !X.want || audio.ended || audio.readyState < 3) return;
         // nadie tocó pausa en Cumito: fue una llamada, un audio de WhatsApp, otra app...
         // queda en pausa, pero apenas se pueda vuelve sola
         startCut();
@@ -635,8 +638,7 @@
     function startCut() {
       if (X.cut) return;
       X.cut = { at: Date.now(), pos: X.elapsed() };
-      slog('interrumpida');
-      if (X.mode === 'stream' && X.sid) cmd('solo_pause', { sid: X.sid });
+      slog('interrumpida', { modo: X.mode, rs: audio.readyState });
       X.report(false);
       changed();
       X.cutT = setInterval(tryBack, 1500);
@@ -646,7 +648,6 @@
       clearInterval(X.cutT);
       slog('volvio', { tras: Math.round((Date.now() - X.cut.at) / 1000) });
       X.cut = null;
-      if (X.mode === 'stream' && X.sid) cmd('solo_resume', { sid: X.sid });
       X.report(false);
       changed();
     }
@@ -692,6 +693,7 @@
         setTimeout(() => { if (X.follow === who && X.cur === c) { X.follow = null; toast('Se cortó la sala: sigo con tu lista'); next(false); } }, 7000);
         return;
       }
+      slog('termino-archivo', { q: X.q.length });
       // terminó de verdad: la siguiente ya está lista, se pone en el mismo instante
       if (X.repeat === 'one' && X.cur) { audio.currentTime = 0; audio.play().catch(() => {}); X.report(true); return; }
       if (X.q.length || X.radio) { next(false); return; }
@@ -1084,7 +1086,7 @@
     }
     h += '<div class="sec" style="margin-top:34px"><a class="opt quiet" href="../?v2"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Usar la app anterior</b><small>Por si algo falla en la 3.0</small></span></a>' +
       '<a class="opt quiet" href="../m3s/"><span class="oi">' + I.swap + '</span><span style="flex:1"><b>Motor de música anterior</b><small>La transmisión en vivo, por si el nuevo falla con la pantalla apagada</small></span></a>' +
-      '<p class="diag">3.2.1 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
+      '<p class="diag">3.2.2 · ' + innerWidth + '×' + innerHeight + ' de ' + screen.width + '×' + screen.height + ' · borde ' + Math.round(SCR.sb) + (SCR.gap ? ' · ajuste ' + SCR.gap : '') + (STANDALONE ? ' · app' : ' · navegador') + '</p></div>';
     return h + '</div>';
   }
 
